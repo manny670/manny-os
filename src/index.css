@@ -1,0 +1,176 @@
+:root {
+  /* Ultra-Cool Celestial Obsidian & Electric Cyan Theme */
+  --bg-app: #06070a;
+  --bg-primary: #0a0c12;
+  --bg-surface: #10131d;
+  --bg-card: #151926;
+  --bg-card-hover: #1c2234;
+  --bg-elevated: #22293e;
+  --bg-input: #0d1018;
+
+  /* Cream & Luminescent Text */
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #7e8ba0;
+  --text-faint: #475569;
+
+  /* Futuristic Borders & Neon Highlights */
+  --border-hairline: rgba(56, 189, 248, 0.08);
+  --border-subtle: rgba(56, 189, 248, 0.16);
+  --border-medium: rgba(56, 189, 248, 0.3);
+  --border-focus: #38bdf8;
+  --border-glow: rgba(56, 189, 248, 0.5);
+
+  /* Celestial Electric Blue & Sapphire Accents */
+  --accent-primary: #38bdf8;
+  --accent-primary-hover: #7dd3fc;
+  --accent-primary-faint: rgba(56, 189, 248, 0.12);
+  --accent-blue: #38bdf8;
+  --accent-cyan: #06b6d4;
+  --accent-sapphire: #0284c7;
+  --accent-indigo: #818cf8;
+  --accent-purple: #c084fc;
+  
+  /* Secondary Functional Accents */
+  --accent-emerald: #10b981;
+  --accent-emerald-faint: rgba(16, 185, 129, 0.14);
+  --accent-coral: #f43f5e;
+  --accent-coral-faint: rgba(244, 63, 94, 0.14);
+
+  /* Typography */
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Space Grotesk', -apple-system, monospace;
+
+  /* Layout & Sizing */
+  --sidebar-width: 280px;
+  --header-height: 64px;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 26px;
+  --radius-pill: 9999px;
+
+  /* High-Tech Shadows & Luminescence */
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.8);
+  --shadow-glow: 0 0 35px rgba(56, 189, 248, 0.28);
+  --shadow-glow-emerald: 0 0 30px rgba(16, 185, 129, 0.25);
+  --shadow-glow-cyan: 0 0 45px rgba(6, 182, 212, 0.35);
+}
+
+/* Reset & Box Sizing */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  background-color: var(--bg-app);
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.08) 0%, transparent 60%),
+    radial-gradient(circle at 100% 50%, rgba(129, 140, 248, 0.04) 0%, transparent 50%),
+    radial-gradient(circle at 0% 100%, rgba(6, 182, 212, 0.05) 0%, transparent 50%);
+  background-attachment: fixed;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+}
+
+/* Futuristic Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.2);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.45);
+}
+
+/* Base Typography */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+p {
+  color: var(--text-secondary);
+}
+
+button {
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border: none;
+  background: none;
+  outline: none;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+input, textarea, select {
+  font-family: var(--font-sans);
+  outline: none;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.6; transform: scale(1); filter: drop-shadow(0 0 15px rgba(56, 189, 248, 0.3)); }
+  50% { opacity: 1; transform: scale(1.03); filter: drop-shadow(0 0 30px rgba(56, 189, 248, 0.6)); }
+}
+
+@keyframes orbitSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes orbitSpinReverse {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+@keyframes radarSweep {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Glassmorphism utility */
+.glass-panel {
+  background: rgba(16, 19, 29, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-subtle);
+}
+
+.glass-panel:hover {
+  border-color: var(--border-medium);
+  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.5), 0 0 20px rgba(56, 189, 248, 0.12);
+}

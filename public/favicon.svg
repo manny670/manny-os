@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <circle cx="32" cy="32" r="30" fill="#0A0B0E" stroke="#F5F3EB" stroke-width="1.5" stroke-opacity="0.2"/>
+  <ellipse cx="32" cy="32" rx="24" ry="9" stroke="#E5B95C" stroke-width="1.2" stroke-dasharray="3 3" transform="rotate(-25 32 32)"/>
+  <circle cx="32" cy="32" r="10" fill="url(#core-grad)"/>
+  <circle cx="48" cy="24" r="3" fill="#F5F3EB"/>
+  <defs>
+    <radialGradient id="core-grad" cx="40%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#FAF8F3"/>
+      <stop offset="60%" stop-color="#E5B95C"/>
+      <stop offset="100%" stop-color="#8C631B"/>
+    </radialGradient>
+  </defs>
+</svg>
