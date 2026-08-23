@@ -76,7 +76,6 @@ export function getStoredGoals() {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      // Ensure all goals exist with clean numeric progress
       return parsed.map(g => ({
         ...g,
         completed: typeof g.completed === 'number' ? g.completed : 0
@@ -140,17 +139,5 @@ export function saveStoredPlan(planState) {
     }
   } catch (err) {
     console.error('Error saving plan state:', err);
-  }
-}
-
-export function getGeminiApiKey() {
-  return localStorage.getItem('orbitGeminiApiKey') || '';
-}
-
-export function saveGeminiApiKey(key) {
-  if (key) {
-    localStorage.setItem('orbitGeminiApiKey', key.trim());
-  } else {
-    localStorage.removeItem('orbitGeminiApiKey');
   }
 }

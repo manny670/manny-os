@@ -271,7 +271,7 @@ export default function Today({
               }}
             >
               <Sparkles size={13} />
-              <span>ORBIT GEMINI INTELLIGENCE</span>
+              <span>ORBIT</span>
             </div>
 
             <h2
@@ -700,7 +700,7 @@ export default function Today({
             >
               <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ color: 'var(--accent-primary)' }}>•</span>
-                <span>Gemini AI anchors exact meetings & deadlines (e.g. YAC at 4pm)</span>
+                <span>Works around your busy hours and prioritizes your daily goals</span>
               </li>
               <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ color: 'var(--accent-sapphire)' }}>•</span>
@@ -708,7 +708,7 @@ export default function Today({
               </li>
               <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ color: 'var(--accent-emerald)' }}>•</span>
-                <span>Protects gym, meals, and guaranteed free time before sleep</span>
+                <span>Protects gym, breaks, and guaranteed free time before sleep</span>
               </li>
             </ul>
           </div>

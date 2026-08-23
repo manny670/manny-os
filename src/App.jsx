@@ -70,7 +70,7 @@ export default function App() {
   const totalTrackedMinutes = activity.reduce((acc, act) => acc + (act.minutes || 0), 0);
 
   // Compute live ranked goals
-  const rankedGoals = scoreAndRankGoals(goals, planState?.checkInPreferences?.urgentText || '');
+  const rankedGoals = scoreAndRankGoals(goals, planState?.checkInPreferences?.selectedGoalId || 'none');
 
   // Helper to trigger toasts
   const showToast = useCallback((message, type = 'info') => {
@@ -548,6 +548,7 @@ export default function App() {
         isOpen={isCheckInOpen}
         onClose={() => setIsCheckInOpen(false)}
         onSubmit={handleCheckInSubmit}
+        goals={goals}
         initialValues={planState?.checkInPreferences}
         isHomeTrigger={isHomeTrigger}
       />

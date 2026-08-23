@@ -10,7 +10,8 @@ import {
   Sparkles,
   ChevronRight,
   Plus,
-  RotateCcw
+  RotateCcw,
+  Lock
 } from 'lucide-react';
 import { formatDuration } from '../utils/timeHelpers';
 
@@ -69,7 +70,7 @@ export default function Focus({
 
   if (!currentBlock) {
     return (
-      <div style={{ padding: '60px 40px', textAlign: 'center' }}>
+      <div style={{ padding: '60px 20px', textAlign: 'center' }}>
         <h2>No active block found.</h2>
         <button
           onClick={onNavigateToOverview}
@@ -77,7 +78,7 @@ export default function Focus({
             marginTop: '16px',
             padding: '12px 24px',
             backgroundColor: 'var(--accent-primary)',
-            color: '#08090C',
+            color: '#06070a',
             borderRadius: 'var(--radius-md)',
             fontWeight: 700
           }}
@@ -92,7 +93,8 @@ export default function Focus({
   const secs = secondsRemaining % 60;
   const timeDisplay = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
-  const isBreak = currentBlock.type === 'break' || currentBlock.type === 'dinner';
+  const isBreak = currentBlock.type === 'break';
+  const isBusy = currentBlock.type === 'busy' || currentBlock.isBusy;
   const progressPercent = Math.max(
     0,
     Math.min(
@@ -105,12 +107,13 @@ export default function Focus({
     <div
       className="focus-view animate-fade-in"
       style={{
-        padding: '32px 40px 60px',
+        padding: '32px 24px 60px',
         maxWidth: '800px',
         margin: '0 auto',
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center'
+        alignItems: 'center',
+        width: '100%'
       }}
     >
       {/* Top Breadcrumb / Navigation */}
@@ -120,7 +123,7 @@ export default function Focus({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          marginBottom: '28px'
+          marginBottom: '24px'
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -130,11 +133,11 @@ export default function Focus({
               fontWeight: 700,
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
-              color: isBreak ? 'var(--accent-emerald)' : 'var(--accent-primary)',
+              color: isBusy ? 'var(--text-muted)' : isBreak ? 'var(--accent-emerald)' : 'var(--accent-primary)',
               fontFamily: 'var(--font-mono)'
             }}
           >
-            {isBreak ? 'RECHARGE IN PROGRESS' : 'FOCUS IN PROGRESS'}
+            {isBusy ? 'BUSY / UNAVAILABLE' : isBreak ? 'RECHARGE IN PROGRESS' : 'FOCUS IN PROGRESS'}
           </span>
           <span style={{ color: 'var(--border-medium)' }}>•</span>
           <span
@@ -168,14 +171,23 @@ export default function Focus({
 
       {/* Main Focus Card */}
       <div
+        className="focus-card"
         style={{
           width: '100%',
           backgroundColor: 'var(--bg-surface)',
-          border: isBreak ? '1.5px solid var(--accent-emerald)' : '1.5px solid var(--accent-primary-faint)',
+          border: isBusy
+            ? '1.5px dashed rgba(126, 139, 160, 0.4)'
+            : isBreak
+            ? '1.5px solid var(--accent-emerald)'
+            : '1.5px solid var(--accent-primary-faint)',
           borderRadius: 'var(--radius-xl)',
-          padding: '40px 32px',
+          padding: '40px 24px',
           textAlign: 'center',
-          boxShadow: isBreak ? '0 0 35px rgba(52, 211, 153, 0.1)' : '0 0 35px rgba(56, 189, 248, 0.12)',
+          boxShadow: isBusy
+            ? '0 0 20px rgba(0, 0, 0, 0.4)'
+            : isBreak
+            ? '0 0 35px rgba(16, 185, 129, 0.12)'
+            : '0 0 35px rgba(56, 189, 248, 0.14)',
           position: 'relative',
           overflow: 'hidden',
           marginBottom: '24px'
@@ -208,7 +220,8 @@ export default function Focus({
               fontSize: '0.88rem',
               color: 'var(--text-secondary)',
               maxWidth: '480px',
-              margin: '0 auto 28px'
+              margin: '0 auto 28px',
+              lineHeight: 1.45
             }}
           >
             {currentBlock.note}
@@ -221,6 +234,7 @@ export default function Focus({
             position: 'relative',
             width: '260px',
             height: '260px',
+            maxWidth: '100%',
             margin: '0 auto 32px',
             display: 'flex',
             flexDirection: 'column',
@@ -252,7 +266,7 @@ export default function Focus({
               cx="130"
               cy="130"
               r="115"
-              stroke={isBreak ? 'var(--accent-emerald)' : 'var(--accent-primary)'}
+              stroke={isBusy ? 'var(--text-muted)' : isBreak ? 'var(--accent-emerald)' : 'var(--accent-primary)'}
               strokeWidth="10"
               fill="none"
               strokeDasharray={2 * Math.PI * 115}
@@ -291,14 +305,14 @@ export default function Focus({
         </div>
 
         {/* Primary Controls: Play/Pause & Complete */}
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '14px', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '14px', marginBottom: '24px' }}>
           <button
             onClick={() => setIsRunning(!isRunning)}
             style={{
               padding: '14px 28px',
               borderRadius: 'var(--radius-lg)',
               backgroundColor: isRunning ? 'var(--bg-card)' : 'var(--accent-primary)',
-              color: isRunning ? 'var(--text-primary)' : '#08090C',
+              color: isRunning ? 'var(--text-primary)' : '#06070a',
               border: '1px solid var(--border-subtle)',
               fontWeight: 700,
               fontSize: '0.95rem',
@@ -314,7 +328,7 @@ export default function Focus({
               </>
             ) : (
               <>
-                <Play size={18} fill="#08090C" />
+                <Play size={18} fill="#06070a" />
                 <span>Resume Timer</span>
               </>
             )}
@@ -327,13 +341,13 @@ export default function Focus({
                 padding: '14px 28px',
                 borderRadius: 'var(--radius-lg)',
                 backgroundColor: 'var(--accent-emerald)',
-                color: '#08090C',
+                color: '#06070a',
                 fontWeight: 700,
                 fontSize: '0.95rem',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '8px',
-                boxShadow: '0 4px 16px rgba(52, 211, 153, 0.25)'
+                boxShadow: '0 4px 16px rgba(16, 185, 129, 0.25)'
               }}
             >
               <Sparkles size={18} />
@@ -346,7 +360,7 @@ export default function Focus({
                 padding: '14px 28px',
                 borderRadius: 'var(--radius-lg)',
                 backgroundColor: 'var(--accent-primary)',
-                color: '#08090C',
+                color: '#06070a',
                 fontWeight: 700,
                 fontSize: '0.95rem',
                 display: 'inline-flex',
@@ -356,13 +370,13 @@ export default function Focus({
               }}
             >
               <CheckCircle2 size={18} />
-              <span>Complete Block →</span>
+              <span>{isBusy ? 'Finish Busy Block →' : 'Complete Block →'}</span>
             </button>
           )}
         </div>
 
         {/* Secondary Action Bar: +15, +30, Need Break, Push Later, Cancel Block */}
-        {!isBreak && (
+        {!isBreak && !isBusy && (
           <div
             style={{
               display: 'flex',
@@ -493,16 +507,26 @@ export default function Focus({
             padding: '16px 20px',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between'
+            justifyContent: 'space-between',
+            gap: '12px'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '1.2rem' }}>{nextBlock.icon || '📌'}</span>
-            <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+            <span style={{ fontSize: '1.2rem', flexShrink: 0 }}>{nextBlock.icon || '📌'}</span>
+            <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>
                 Up Next ({nextBlock.startTime})
               </div>
-              <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+              <div
+                style={{
+                  fontSize: '0.92rem',
+                  fontWeight: 600,
+                  color: 'var(--text-primary)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}
+              >
                 {nextBlock.title}
               </div>
             </div>
@@ -513,7 +537,8 @@ export default function Focus({
               fontSize: '0.78rem',
               color: 'var(--accent-primary)',
               fontFamily: 'var(--font-mono)',
-              fontWeight: 600
+              fontWeight: 600,
+              flexShrink: 0
             }}
           >
             {formatDuration(nextBlock.durationMinutes)}

@@ -6,6 +6,7 @@
   width: 100%;
   background-color: var(--bg-app);
   position: relative;
+  overflow-x: hidden;
 }
 
 .main-content {
@@ -24,15 +25,15 @@
   height: 60px;
   background-color: var(--bg-primary);
   border-bottom: 1px solid var(--border-hairline);
-  padding: 0 20px;
+  padding: 0 16px;
   align-items: center;
   justify-content: space-between;
   position: sticky;
   top: 0;
   z-index: 80;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
-
-/* Responsive Media Queries */
 
 /* Tablet & Mobile (under 960px) */
 @media (max-width: 960px) {
@@ -43,6 +44,8 @@
     bottom: 0;
     transform: translateX(-100%);
     box-shadow: var(--shadow-lg);
+    z-index: 150 !important;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
   }
 
   .sidebar-container.mobile-open {
@@ -58,18 +61,18 @@
   .focus-view,
   .goals-view,
   .progress-view {
-    padding: 20px 16px 40px !important;
+    padding: 20px 16px 48px !important;
   }
 
   .orbit-hero-card {
     grid-template-columns: 1fr !important;
     padding: 24px 20px !important;
-    gap: 20px !important;
+    gap: 24px !important;
     text-align: center;
   }
 
   .orbit-hero-card h2 {
-    font-size: 1.6rem !important;
+    font-size: 1.65rem !important;
   }
 
   .orbit-hero-card button {
@@ -79,32 +82,81 @@
 
   .orbit-planet-container {
     max-width: 180px !important;
+    margin: 0 auto;
   }
 
-  /* 2-column grids collapse gracefully */
+  /* Progress view columns */
   .progress-view > div:last-child {
     grid-template-columns: 1fr !important;
   }
 }
 
-/* Mobile Phone (under 600px) */
-@media (max-width: 600px) {
+/* Mobile Phones (under 640px) */
+@media (max-width: 640px) {
   .today-view h1,
   .goals-view h1,
   .progress-view h1,
   .overview-view h1 {
     font-size: 1.6rem !important;
+    line-height: 1.25 !important;
   }
 
-  .focus-view .focus-card {
-    padding: 24px 16px !important;
+  .today-view,
+  .overview-view,
+  .focus-view,
+  .goals-view,
+  .progress-view {
+    padding: 16px 12px 40px !important;
   }
 
+  /* Modal Dialogs */
   .modal-backdrop {
-    padding: 10px !important;
+    padding: 8px !important;
   }
 
   .checkin-dialog {
-    max-height: 96vh !important;
+    max-height: 94vh !important;
+    border-radius: var(--radius-lg) !important;
+  }
+
+  .checkin-dialog form {
+    padding: 16px 14px 24px !important;
+  }
+
+  .checkin-dialog > div:first-child {
+    padding: 16px 16px 12px !important;
+  }
+
+  /* Focus Card */
+  .focus-view {
+    padding: 16px 12px 40px !important;
+  }
+
+  .focus-card {
+    padding: 24px 16px !important;
+  }
+
+  /* Timeline Blocks */
+  .overview-view .timeline-block {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+    padding: 14px 14px !important;
+  }
+
+  /* Buttons & Controls */
+  .button-group-responsive {
+    flex-direction: column !important;
+    width: 100%;
+  }
+
+  .button-group-responsive button {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  /* Grid collapse */
+  .grid-responsive-1col {
+    grid-template-columns: 1fr !important;
   }
 }

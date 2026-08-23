@@ -11,7 +11,7 @@ import {
   BookOpen,
   ArrowRight,
   ShieldCheck,
-  Pin
+  Lock
 } from 'lucide-react';
 import { formatDuration } from '../utils/timeHelpers';
 
@@ -28,7 +28,7 @@ export default function Overview({
         <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🪐</div>
         <h2 style={{ fontSize: '1.6rem', fontWeight: 800, marginBottom: '8px' }}>No active schedule yet.</h2>
         <p style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
-          Tell Orbit about your afternoon and let the Gemini AI scheduling engine map out your day.
+          Tell Orbit about your afternoon and let the scheduling engine map out your day.
         </p>
         <button
           onClick={onEditCheckIn}
@@ -36,7 +36,7 @@ export default function Overview({
             padding: '14px 28px',
             borderRadius: 'var(--radius-lg)',
             backgroundColor: 'var(--accent-primary)',
-            color: '#08090C',
+            color: '#06070a',
             fontWeight: 700
           }}
         >
@@ -83,7 +83,7 @@ export default function Overview({
           }}
         >
           <Sparkles size={12} />
-          <span>ORBIT GEMINI PLAN</span>
+          <span>ORBIT PLAN</span>
         </div>
 
         <h1 style={{ fontSize: '2.2rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>
@@ -194,7 +194,7 @@ export default function Overview({
               padding: '16px 32px',
               borderRadius: 'var(--radius-lg)',
               backgroundColor: 'var(--accent-primary)',
-              color: '#08090C',
+              color: '#06070a',
               fontSize: '1rem',
               fontWeight: 700,
               display: 'inline-flex',
@@ -203,7 +203,7 @@ export default function Overview({
               boxShadow: '0 4px 20px rgba(56, 189, 248, 0.25)'
             }}
           >
-            <Play size={18} fill="#08090C" />
+            <Play size={18} fill="#06070a" />
             <span>Resume Focus Session →</span>
           </button>
         ) : (
@@ -213,7 +213,7 @@ export default function Overview({
               padding: '16px 32px',
               borderRadius: 'var(--radius-lg)',
               backgroundColor: 'var(--accent-primary)',
-              color: '#08090C',
+              color: '#06070a',
               fontSize: '1rem',
               fontWeight: 700,
               display: 'inline-flex',
@@ -222,7 +222,7 @@ export default function Overview({
               boxShadow: '0 4px 20px rgba(56, 189, 248, 0.25)'
             }}
           >
-            <Play size={18} fill="#08090C" />
+            <Play size={18} fill="#06070a" />
             <span>START MY DAY →</span>
           </button>
         )}
@@ -280,10 +280,10 @@ export default function Overview({
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {blocks.map((block, idx) => {
-            const isBreak = block.type === 'break' || block.type === 'dinner';
+            const isBreak = block.type === 'break';
             const isFreeTime = block.type === 'freetime';
             const isGym = block.type === 'gym';
-            const isFixed = block.isFixedTime;
+            const isBusyBlock = block.type === 'busy' || block.isBusy;
 
             let tagColor = 'var(--accent-primary)';
             let tagBg = 'var(--accent-primary-faint)';
@@ -296,6 +296,9 @@ export default function Overview({
             } else if (isGym) {
               tagColor = 'var(--accent-coral)';
               tagBg = 'var(--accent-coral-faint)';
+            } else if (isBusyBlock) {
+              tagColor = 'var(--text-muted)';
+              tagBg = 'rgba(126, 139, 160, 0.14)';
             }
 
             return (
@@ -307,8 +310,16 @@ export default function Overview({
                   gap: '18px',
                   padding: '16px 20px',
                   borderRadius: 'var(--radius-lg)',
-                  backgroundColor: isFixed ? 'var(--bg-card)' : isBreak ? 'var(--bg-primary)' : 'var(--bg-surface)',
-                  border: isFixed ? '1.5px solid var(--accent-primary)' : isBreak ? '1px dashed var(--border-subtle)' : '1px solid var(--border-hairline)',
+                  backgroundColor: isBusyBlock
+                    ? 'rgba(16, 19, 29, 0.6)'
+                    : isBreak
+                    ? 'var(--bg-primary)'
+                    : 'var(--bg-surface)',
+                  border: isBusyBlock
+                    ? '1.5px dashed rgba(126, 139, 160, 0.3)'
+                    : isBreak
+                    ? '1px dashed var(--border-subtle)'
+                    : '1px solid var(--border-hairline)',
                   position: 'relative',
                   transition: 'transform 0.18s ease'
                 }}
@@ -321,7 +332,7 @@ export default function Overview({
                     flexShrink: 0
                   }}
                 >
-                  <div style={{ fontSize: '0.9rem', fontWeight: 700, color: isFixed ? 'var(--accent-primary)' : 'var(--text-primary)' }}>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 700, color: isBusyBlock ? 'var(--text-muted)' : 'var(--text-primary)' }}>
                     {block.startTime}
                   </div>
                   <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
@@ -350,7 +361,7 @@ export default function Overview({
                 {/* Title & Context */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    <span style={{ fontSize: '1rem', fontWeight: 700, color: isBusyBlock ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
                       {block.title}
                     </span>
                     <span
@@ -366,13 +377,13 @@ export default function Overview({
                     >
                       {formatDuration(block.durationMinutes)}
                     </span>
-                    {isFixed && (
+                    {isBusyBlock && (
                       <span
                         style={{
                           fontSize: '0.68rem',
                           fontWeight: 700,
-                          color: 'var(--accent-primary)',
-                          backgroundColor: 'var(--accent-primary-faint)',
+                          color: 'var(--text-muted)',
+                          backgroundColor: 'var(--bg-card)',
                           padding: '2px 8px',
                           borderRadius: 'var(--radius-pill)',
                           display: 'inline-flex',
@@ -380,11 +391,11 @@ export default function Overview({
                           gap: '3px'
                         }}
                       >
-                        <Pin size={10} />
-                        <span>AI ANCHOR ({block.startTime})</span>
+                        <Lock size={10} />
+                        <span>UNAVAILABLE</span>
                       </span>
                     )}
-                    {block.tracked && !isFixed && (
+                    {block.tracked && !isBusyBlock && (
                       <span
                         style={{
                           fontSize: '0.68rem',

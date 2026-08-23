@@ -1,13 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { X, Sparkles, Clock, Zap, BookOpen, Dumbbell, Coffee, AlertCircle, Check, Key, Bot } from 'lucide-react';
+import {
+  X,
+  Sparkles,
+  Clock,
+  Zap,
+  BookOpen,
+  Dumbbell,
+  Coffee,
+  Calendar,
+  Lock,
+  Plus,
+  Trash2,
+  Check,
+  Target
+} from 'lucide-react';
 import { getCurrentTimeString } from '../utils/timeHelpers';
-import { getGeminiApiKey, saveGeminiApiKey } from '../utils/storage';
-import { parseContextWithAI } from '../utils/aiScheduler';
 
 export default function CheckInModal({
   isOpen,
   onClose,
   onSubmit,
+  goals = [],
   initialValues = null,
   isHomeTrigger = false
 }) {
@@ -16,14 +29,18 @@ export default function CheckInModal({
   const [bedtime, setBedtime] = useState('10:30 PM');
   const [energy, setEnergy] = useState('normal'); // 'low' | 'normal' | 'high'
   const [schoolworkMinutes, setSchoolworkMinutes] = useState(60);
-  const [urgentText, setUrgentText] = useState('');
+  
+  // Specific Goal Selection (Replaces AI input)
+  const [selectedGoalId, setSelectedGoalId] = useState('none'); // 'none' or goal id
+
+  // "Are you busy today?" Time Range Feature
+  const [isBusy, setIsBusy] = useState(false);
+  const [busyRanges, setBusyRanges] = useState([
+    { id: 'busy-1', startTime: '5:00 PM', endTime: '8:00 PM', label: 'Busy' }
+  ]);
+
   const [gymToday, setGymToday] = useState(true);
   const [freeTimeMinutes, setFreeTimeMinutes] = useState(60);
-  const [isAiThinking, setIsAiThinking] = useState(false);
-  
-  // Gemini API key settings drawer
-  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
-  const [apiKey, setApiKey] = useState(() => getGeminiApiKey());
 
   useEffect(() => {
     if (isOpen) {
@@ -33,7 +50,13 @@ export default function CheckInModal({
         setBedtime(initialValues.bedtime || '10:30 PM');
         setEnergy(initialValues.energy || 'normal');
         setSchoolworkMinutes(initialValues.schoolworkMinutes ?? 60);
-        setUrgentText(initialValues.urgentText || '');
+        setSelectedGoalId(initialValues.selectedGoalId || 'none');
+        setIsBusy(initialValues.isBusy ?? false);
+        setBusyRanges(
+          Array.isArray(initialValues.busyRanges) && initialValues.busyRanges.length > 0
+            ? initialValues.busyRanges
+            : [{ id: 'busy-1', startTime: '5:00 PM', endTime: '8:00 PM', label: 'Busy' }]
+        );
         setGymToday(initialValues.gymToday ?? true);
         setFreeTimeMinutes(initialValues.freeTimeMinutes ?? 60);
       } else if (isHomeTrigger) {
@@ -44,51 +67,39 @@ export default function CheckInModal({
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    saveGeminiApiKey(apiKey);
-    setIsAiThinking(true);
-
-    try {
-      // Run AI semantic analysis on user's natural language input
-      const aiParsed = await parseContextWithAI(urgentText, startTime, endTime, energy);
-      
-      onSubmit({
-        startTime,
-        endTime,
-        bedtime,
-        energy,
-        schoolworkMinutes,
-        urgentText,
-        gymToday,
-        freeTimeMinutes,
-        aiParsedData: aiParsed
-      });
-    } catch (err) {
-      console.error('AI submission error:', err);
-      onSubmit({
-        startTime,
-        endTime,
-        bedtime,
-        energy,
-        schoolworkMinutes,
-        urgentText,
-        gymToday,
-        freeTimeMinutes
-      });
-    } finally {
-      setIsAiThinking(false);
-    }
+  const handleAddBusyRange = () => {
+    const nextId = `busy-${Date.now()}`;
+    setBusyRanges((prev) => [
+      ...prev,
+      { id: nextId, startTime: '5:00 PM', endTime: '7:00 PM', label: 'Busy' }
+    ]);
   };
 
-  const samplePrompts = [
-    'AP Physics test tomorrow',
-    'Finish my ISEF proposal draft',
-    'meeting with yac at 4pm',
-    'YAC secretary campaign speech prep',
-    'ACT math timed practice drills',
-    'Shopify product research and store design'
-  ];
+  const handleRemoveBusyRange = (id) => {
+    setBusyRanges((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  const handleUpdateBusyRange = (id, field, value) => {
+    setBusyRanges((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
+    );
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSubmit({
+      startTime,
+      endTime,
+      bedtime,
+      energy,
+      schoolworkMinutes,
+      selectedGoalId,
+      isBusy,
+      busyRanges: isBusy ? busyRanges : [],
+      gymToday,
+      freeTimeMinutes
+    });
+  };
 
   const schoolworkOptions = [
     { label: 'None (0m)', value: 0 },
@@ -114,28 +125,29 @@ export default function CheckInModal({
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(8, 9, 12, 0.85)',
-        backdropFilter: 'blur(8px)',
+        backgroundColor: 'rgba(6, 7, 10, 0.88)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
         zIndex: 200,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '20px',
+        padding: '16px',
         overflowY: 'auto'
       }}
     >
       <div
-        className="checkin-dialog"
+        className="checkin-dialog glass-panel"
         style={{
           backgroundColor: 'var(--bg-primary)',
           border: '1px solid var(--border-subtle)',
           borderRadius: 'var(--radius-xl)',
           width: '100%',
-          maxWidth: '640px',
-          maxHeight: '90vh',
+          maxWidth: '680px',
+          maxHeight: '92vh',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: 'var(--shadow-lg)',
+          boxShadow: 'var(--shadow-lg), 0 0 35px rgba(56, 189, 248, 0.15)',
           position: 'relative',
           overflow: 'hidden'
         }}
@@ -143,11 +155,12 @@ export default function CheckInModal({
         {/* Header */}
         <div
           style={{
-            padding: '28px 32px 20px',
+            padding: '24px 28px 18px',
             borderBottom: '1px solid var(--border-hairline)',
             display: 'flex',
             alignItems: 'flex-start',
-            justifyContent: 'space-between'
+            justifyContent: 'space-between',
+            gap: '12px'
           }}
         >
           <div>
@@ -164,19 +177,19 @@ export default function CheckInModal({
                 fontWeight: 700,
                 letterSpacing: '0.06em',
                 textTransform: 'uppercase',
-                marginBottom: '10px',
+                marginBottom: '8px',
                 fontFamily: 'var(--font-mono)'
               }}
             >
               <Sparkles size={12} />
-              <span>ORBIT GEMINI AI CHECK-IN</span>
+              <span>ORBIT CHECK-IN</span>
             </div>
             <h2
               style={{
                 fontSize: '1.45rem',
-                fontWeight: 700,
+                fontWeight: 800,
                 color: 'var(--text-primary)',
-                letterSpacing: '-0.02em'
+                letterSpacing: '-0.025em'
               }}
             >
               Tell Orbit about your afternoon.
@@ -185,10 +198,10 @@ export default function CheckInModal({
               style={{
                 fontSize: '0.86rem',
                 color: 'var(--text-secondary)',
-                marginTop: '4px'
+                marginTop: '3px'
               }}
             >
-              Type anything naturally. Orbit's AI reads your goals, exams, or meetings (with or without a time).
+              Orbit will build your schedule around your priorities and busy hours.
             </p>
           </div>
 
@@ -200,7 +213,8 @@ export default function CheckInModal({
               borderRadius: 'var(--radius-sm)',
               color: 'var(--text-muted)',
               backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-hairline)'
+              border: '1px solid var(--border-hairline)',
+              flexShrink: 0
             }}
             onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
             onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
@@ -210,126 +224,331 @@ export default function CheckInModal({
         </div>
 
         {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} style={{ overflowY: 'auto', padding: '24px 32px 32px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <form onSubmit={handleSubmit} style={{ overflowY: 'auto', padding: '24px 28px 32px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '26px' }}>
             
-            {/* 1. Urgent Information & AI Context Field (Prominently at Top) */}
+            {/* 1. DAILY GOAL PREFERENCE QUESTION */}
             <div
               style={{
                 backgroundColor: 'var(--bg-surface)',
-                border: '1.5px solid var(--accent-primary-faint)',
+                border: '1px solid var(--border-hairline)',
                 borderRadius: 'var(--radius-lg)',
-                padding: '16px 18px'
+                padding: '20px'
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontSize: '0.92rem',
+                  fontWeight: 700,
+                  color: 'var(--text-primary)',
+                  marginBottom: '6px'
+                }}
+              >
+                <Target size={17} style={{ color: 'var(--accent-primary)' }} />
+                <span>Do you want to work on anything specific today?</span>
+              </label>
+              <p
+                style={{
+                  fontSize: '0.78rem',
+                  color: 'var(--text-muted)',
+                  marginBottom: '14px'
+                }}
+              >
+                Pick a goal to prioritize today, or let Orbit’s algorithm balance your weekly commitments.
+              </p>
+
+              {/* Selectable Goal Cards / Pills Grid */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                  gap: '10px'
+                }}
+              >
+                {/* Option: No specification — let Orbit decide */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedGoalId('none')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '12px 14px',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: selectedGoalId === 'none' ? 'var(--bg-card)' : 'var(--bg-primary)',
+                    border: selectedGoalId === 'none'
+                      ? '1.5px solid var(--accent-primary)'
+                      : '1px solid var(--border-hairline)',
+                    color: selectedGoalId === 'none' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                    textAlign: 'left',
+                    boxShadow: selectedGoalId === 'none' ? '0 0 20px rgba(56, 189, 248, 0.18)' : 'none',
+                    transition: 'all 0.2s ease',
+                    gridColumn: '1 / -1'
+                  }}
+                >
+                  <Sparkles size={16} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '0.88rem', fontWeight: 700 }}>
+                      No specification — let Orbit decide
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      Automatically balances weekly progress & energy
+                    </div>
+                  </div>
+                  {selectedGoalId === 'none' && <Check size={16} />}
+                </button>
+
+                {/* Options for each user goal */}
+                {goals.map((g) => {
+                  const isSelected = selectedGoalId === g.id;
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => setSelectedGoalId(g.id)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        padding: '12px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        backgroundColor: isSelected ? 'var(--bg-card)' : 'var(--bg-primary)',
+                        border: isSelected
+                          ? '1.5px solid var(--accent-primary)'
+                          : '1px solid var(--border-hairline)',
+                        color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        textAlign: 'left',
+                        boxShadow: isSelected ? '0 0 20px rgba(56, 189, 248, 0.18)' : 'none',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      <span style={{ fontSize: '1.25rem', flexShrink: 0 }}>{g.icon}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: '0.86rem',
+                            fontWeight: 600,
+                            color: isSelected ? 'var(--accent-primary)' : 'var(--text-primary)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                        >
+                          {g.name}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                          {g.weeklyTarget} {g.unit}/wk
+                        </div>
+                      </div>
+                      {isSelected && <Check size={15} style={{ color: 'var(--accent-primary)' }} />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 2. "ARE YOU BUSY TODAY?" TIME RANGE QUESTION */}
+            <div
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                border: '1px solid var(--border-hairline)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '20px'
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                  marginBottom: '6px'
+                }}
+              >
                 <label
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px',
-                    fontSize: '0.86rem',
+                    gap: '8px',
+                    fontSize: '0.92rem',
                     fontWeight: 700,
-                    color: 'var(--accent-primary)'
+                    color: 'var(--text-primary)'
                   }}
                 >
-                  <Bot size={16} />
-                  <span>Anything urgent, coming up, or on your mind? (No time needed!)</span>
+                  <Lock size={17} style={{ color: 'var(--accent-sapphire)' }} />
+                  <span>Are you busy today?</span>
                 </label>
 
-                <button
-                  type="button"
-                  onClick={() => setShowApiKeyInput(!showApiKeyInput)}
-                  style={{
-                    fontSize: '0.72rem',
-                    color: 'var(--text-muted)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                >
-                  <Key size={11} />
-                  <span>{apiKey ? 'Gemini Key ✓' : 'Gemini Key'}</span>
-                </button>
+                {/* Yes / No Toggle */}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {[
+                    { label: 'No, free afternoon', val: false },
+                    { label: 'Yes, I have plans', val: true }
+                  ].map((btn) => {
+                    const active = isBusy === btn.val;
+                    return (
+                      <button
+                        key={btn.label}
+                        type="button"
+                        onClick={() => setIsBusy(btn.val)}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: 'var(--radius-pill)',
+                          backgroundColor: active ? 'var(--accent-primary)' : 'var(--bg-card)',
+                          color: active ? '#06070a' : 'var(--text-secondary)',
+                          fontWeight: 700,
+                          fontSize: '0.78rem',
+                          border: active ? 'none' : '1px solid var(--border-hairline)',
+                          transition: 'all 0.18s ease'
+                        }}
+                      >
+                        {btn.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              <textarea
-                rows={2}
-                value={urgentText}
-                onChange={(e) => setUrgentText(e.target.value)}
-                placeholder="Example: I have an AP Physics test tomorrow and need to write my ISEF abstract... (Orbit figures out the rest!)"
+              <p
                 style={{
-                  width: '100%',
-                  padding: '12px 14px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--bg-card)',
-                  border: '1px solid var(--border-subtle)',
-                  color: 'var(--text-primary)',
-                  fontSize: '0.9rem',
-                  lineHeight: 1.4,
-                  resize: 'none'
+                  fontSize: '0.78rem',
+                  color: 'var(--text-muted)',
+                  marginBottom: isBusy ? '16px' : '0'
                 }}
-              />
+              >
+                Block out unavailable time (e.g. 5:00 PM–8:00 PM for sports, appointments, or events). Orbit will work around them.
+              </p>
 
-              {/* Quick Prompt Ideas */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', alignSelf: 'center', marginRight: '2px' }}>
-                  Quick ideas:
-                </span>
-                {samplePrompts.map((sample) => (
+              {/* Busy Time Range Inputs */}
+              {isBusy && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+                  {busyRanges.map((range, idx) => (
+                    <div
+                      key={range.id || idx}
+                      style={{
+                        backgroundColor: 'var(--bg-card)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '14px 16px',
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr)) auto',
+                        gap: '12px',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                          Start Time
+                        </label>
+                        <input
+                          type="text"
+                          value={range.startTime}
+                          onChange={(e) => handleUpdateBusyRange(range.id, 'startTime', e.target.value)}
+                          placeholder="5:00 PM"
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            borderRadius: 'var(--radius-sm)',
+                            backgroundColor: 'var(--bg-primary)',
+                            border: '1px solid var(--border-hairline)',
+                            color: 'var(--text-primary)',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '0.88rem',
+                            fontWeight: 600
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                          End Time
+                        </label>
+                        <input
+                          type="text"
+                          value={range.endTime}
+                          onChange={(e) => handleUpdateBusyRange(range.id, 'endTime', e.target.value)}
+                          placeholder="8:00 PM"
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            borderRadius: 'var(--radius-sm)',
+                            backgroundColor: 'var(--bg-primary)',
+                            border: '1px solid var(--border-hairline)',
+                            color: 'var(--text-primary)',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '0.88rem',
+                            fontWeight: 600
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                          Label
+                        </label>
+                        <input
+                          type="text"
+                          value={range.label}
+                          onChange={(e) => handleUpdateBusyRange(range.id, 'label', e.target.value)}
+                          placeholder="Busy"
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            borderRadius: 'var(--radius-sm)',
+                            backgroundColor: 'var(--bg-primary)',
+                            border: '1px solid var(--border-hairline)',
+                            color: 'var(--text-primary)',
+                            fontSize: '0.88rem'
+                          }}
+                        />
+                      </div>
+
+                      {busyRanges.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveBusyRange(range.id)}
+                          style={{
+                            padding: '8px',
+                            color: 'var(--text-muted)',
+                            borderRadius: 'var(--radius-sm)',
+                            alignSelf: 'flex-end',
+                            marginBottom: '2px'
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent-coral)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
                   <button
-                    key={sample}
                     type="button"
-                    onClick={() => setUrgentText(sample)}
+                    onClick={handleAddBusyRange}
                     style={{
-                      padding: '3px 8px',
-                      borderRadius: 'var(--radius-sm)',
-                      backgroundColor: 'var(--bg-card)',
-                      color: 'var(--text-secondary)',
-                      fontSize: '0.72rem',
-                      border: '1px solid var(--border-hairline)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.color = 'var(--accent-primary)';
-                      e.currentTarget.style.borderColor = 'var(--accent-primary)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.color = 'var(--text-secondary)';
-                      e.currentTarget.style.borderColor = 'var(--border-hairline)';
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      color: 'var(--accent-primary)',
+                      padding: '6px 0',
+                      alignSelf: 'flex-start'
                     }}
                   >
-                    + {sample}
+                    <Plus size={14} />
+                    <span>+ Add another busy time range</span>
                   </button>
-                ))}
-              </div>
-
-              {/* Optional Gemini API Key Drawer */}
-              {showApiKeyInput && (
-                <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--border-hairline)' }}>
-                  <label style={{ fontSize: '0.74rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
-                    Google Gemini API Key (Optional — built-in semantic AI runs automatically):
-                  </label>
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="AIzaSy..."
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: 'var(--radius-sm)',
-                      backgroundColor: 'var(--bg-primary)',
-                      border: '1px solid var(--border-subtle)',
-                      color: 'var(--text-primary)',
-                      fontSize: '0.8rem',
-                      fontFamily: 'var(--font-mono)'
-                    }}
-                  />
                 </div>
               )}
             </div>
 
-            {/* 2. Time Constraints: Start & End Time */}
+            {/* 3. TIME CONSTRAINTS: START & END TIME */}
             <div
               style={{
                 display: 'grid',
@@ -473,7 +692,7 @@ export default function CheckInModal({
               </div>
             </div>
 
-            {/* 3. Energy Level */}
+            {/* 4. ENERGY LEVEL */}
             <div>
               <label
                 style={{
@@ -508,7 +727,7 @@ export default function CheckInModal({
                       type="button"
                       onClick={() => setEnergy(item.id)}
                       style={{
-                        padding: '14px 12px',
+                        padding: '14px 10px',
                         borderRadius: 'var(--radius-md)',
                         backgroundColor: isSelected ? 'var(--bg-card)' : 'var(--bg-surface)',
                         border: isSelected ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-hairline)',
@@ -541,7 +760,7 @@ export default function CheckInModal({
               </div>
             </div>
 
-            {/* 4. School Workload */}
+            {/* 5. SCHOOL WORKLOAD */}
             <div>
               <div
                 style={{
@@ -562,7 +781,7 @@ export default function CheckInModal({
                   }}
                 >
                   <BookOpen size={15} style={{ color: 'var(--accent-sapphire)' }} />
-                  <span>How much general schoolwork do you have today?</span>
+                  <span>How much schoolwork do you have today?</span>
                 </label>
                 <span
                   style={{
@@ -607,7 +826,7 @@ export default function CheckInModal({
               </div>
             </div>
 
-            {/* 5. Gym Today? */}
+            {/* 6. GYM TODAY? */}
             <div
               style={{
                 display: 'flex',
@@ -657,7 +876,7 @@ export default function CheckInModal({
                         padding: '8px 18px',
                         borderRadius: 'var(--radius-pill)',
                         backgroundColor: isSelected ? 'var(--accent-primary)' : 'var(--bg-card)',
-                        color: isSelected ? '#08090C' : 'var(--text-secondary)',
+                        color: isSelected ? '#06070a' : 'var(--text-secondary)',
                         fontWeight: 700,
                         fontSize: '0.82rem',
                         border: isSelected ? 'none' : '1px solid var(--border-hairline)',
@@ -671,7 +890,7 @@ export default function CheckInModal({
               </div>
             </div>
 
-            {/* 6. Desired Free Time */}
+            {/* 7. DESIRED FREE TIME */}
             <div>
               <div
                 style={{
@@ -742,13 +961,12 @@ export default function CheckInModal({
           <div style={{ marginTop: '32px' }}>
             <button
               type="submit"
-              disabled={isAiThinking}
               style={{
                 width: '100%',
                 padding: '16px 24px',
                 borderRadius: 'var(--radius-lg)',
                 backgroundColor: 'var(--accent-primary)',
-                color: '#08090C',
+                color: '#06070a',
                 fontSize: '1rem',
                 fontWeight: 700,
                 display: 'flex',
@@ -756,24 +974,19 @@ export default function CheckInModal({
                 justifyContent: 'center',
                 gap: '10px',
                 boxShadow: '0 4px 20px rgba(56, 189, 248, 0.25)',
-                transition: 'all 0.2s ease',
-                opacity: isAiThinking ? 0.7 : 1
+                transition: 'all 0.2s ease'
               }}
               onMouseEnter={(e) => {
-                if (!isAiThinking) {
-                  e.currentTarget.style.backgroundColor = 'var(--accent-primary-hover)';
-                  e.currentTarget.style.transform = 'translateY(-1px)';
-                }
+                e.currentTarget.style.backgroundColor = 'var(--accent-primary-hover)';
+                e.currentTarget.style.transform = 'translateY(-1px)';
               }}
               onMouseLeave={(e) => {
-                if (!isAiThinking) {
-                  e.currentTarget.style.backgroundColor = 'var(--accent-primary)';
-                  e.currentTarget.style.transform = 'none';
-                }
+                e.currentTarget.style.backgroundColor = 'var(--accent-primary)';
+                e.currentTarget.style.transform = 'none';
               }}
             >
               <Sparkles size={18} />
-              <span>{isAiThinking ? 'Orbit Gemini AI Analyzing Afternoon...' : 'Let Orbit Gemini AI Build My Day →'}</span>
+              <span>Let Orbit Build My Day →</span>
             </button>
           </div>
         </form>

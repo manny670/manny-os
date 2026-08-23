@@ -1,20 +1,16 @@
 /**
- * Orbit Scheduling & Contextual Intelligence Engine
- * Layer A: Deterministic Constraint Engine
- * Layer B: Gemini AI Semantic Reasoning & Clock-Time Anchoring
+ * Orbit Deterministic Scheduling Engine
+ * Balances priorities, schoolwork, specific goal selections, busy timeframes, gym, breaks, and protected end times.
  */
 
 import { parseTimeToMinutes, minutesToTimeString, formatDuration } from './timeHelpers';
-import { analyzeContextSemanticAI } from './aiScheduler';
 
 /**
  * Evaluates goals and produces ranked priorities based on user priority,
- * deficit towards weekly target, and natural language urgency matches.
+ * deficit towards weekly target, and specific daily selection.
  */
-export function scoreAndRankGoals(goals, urgentText = '') {
-  const normalizedUrgent = (urgentText || '').toLowerCase();
-
-  const scored = goals.map(goal => {
+export function scoreAndRankGoals(goals = [], selectedGoalId = 'none') {
+  const scored = goals.map((goal) => {
     // 1. Base user priority (1 - 5) -> 10 to 50 points
     const baseScore = (goal.priority || 3) * 10;
 
@@ -24,55 +20,29 @@ export function scoreAndRankGoals(goals, urgentText = '') {
     const progressRatio = Math.min(completed / target, 1.5);
     const deficitScore = Math.max(0, (1 - progressRatio) * 25);
 
-    // 3. Contextual urgency match
-    let urgencyScore = 0;
-    let urgencyReason = '';
+    // 3. User Daily Specific Selection Boost
+    let selectionBoost = 0;
+    let selectionReason = '';
 
-    const name = goal.name.toLowerCase();
-    const id = goal.id.toLowerCase();
-
-    if (normalizedUrgent) {
-      if (
-        (id === 'scioly_yac' || name.includes('yac') || name.includes('science')) &&
-        (normalizedUrgent.includes('yac') || normalizedUrgent.includes('olympiad') || normalizedUrgent.includes('council') || normalizedUrgent.includes('scioly') || normalizedUrgent.includes('speech'))
-      ) {
-        urgencyScore += 50;
-        urgencyReason = 'Extracurricular / council priority recognized';
-      } else if (
-        (id === 'act' || name.includes('act')) &&
-        (normalizedUrgent.includes('act') || normalizedUrgent.includes('test') || normalizedUrgent.includes('exam'))
-      ) {
-        urgencyScore += 45;
-        urgencyReason = 'Standardized test prep priority';
-      } else if (
-        (id === 'isef' || name.includes('research') || name.includes('isef')) &&
-        (normalizedUrgent.includes('isef') || normalizedUrgent.includes('research') || normalizedUrgent.includes('proposal') || normalizedUrgent.includes('draft') || normalizedUrgent.includes('abstract'))
-      ) {
-        urgencyScore += 45;
-        urgencyReason = 'Research milestone recognized';
-      } else if (
-        (id === 'dropshipping' || name.includes('business')) &&
-        (normalizedUrgent.includes('drop') || normalizedUrgent.includes('shop') || normalizedUrgent.includes('business') || normalizedUrgent.includes('product'))
-      ) {
-        urgencyScore += 35;
-        urgencyReason = 'Business project milestone';
-      } else if (normalizedUrgent.includes(name)) {
-        urgencyScore += 35;
-        urgencyReason = 'Specifically mentioned in your notes';
+    if (selectedGoalId && selectedGoalId !== 'none') {
+      if (goal.id === selectedGoalId) {
+        selectionBoost = 100;
+        selectionReason = 'Selected as today’s primary focus';
       }
     }
 
-    const totalScore = baseScore + deficitScore + urgencyScore;
+    const totalScore = baseScore + deficitScore + selectionBoost;
 
     return {
       ...goal,
       internalScore: totalScore,
-      urgencyReason,
-      isUrgent: urgencyScore > 0,
+      selectionReason,
+      isDailyFocus: selectionBoost > 0,
       deficit: target - completed
     };
   });
 
+  // Sort descending by internalScore
   scored.sort((a, b) => b.internalScore - a.internalScore);
 
   return scored.map((item, index) => ({
@@ -82,7 +52,7 @@ export function scoreAndRankGoals(goals, urgentText = '') {
 }
 
 /**
- * Primary Orbit Scheduling Engine (Layer A + Layer B Gemini AI Reasoning)
+ * Generates an Orbit schedule respecting hard constraints and busy periods.
  */
 export function generateOrbitSchedule({
   startTime = '1:00 PM',
@@ -90,11 +60,12 @@ export function generateOrbitSchedule({
   bedtime = '10:30 PM',
   energy = 'normal',
   schoolworkMinutes = 60,
-  urgentText = '',
+  selectedGoalId = 'none',
+  isBusy = false,
+  busyRanges = [],
   gymToday = false,
   freeTimeMinutes = 60,
-  goals = [],
-  aiParsedData = null
+  goals = []
 }) {
   const startMin = parseTimeToMinutes(startTime);
   let endMin = parseTimeToMinutes(endTime);
@@ -104,374 +75,352 @@ export function generateOrbitSchedule({
   let effectiveBedtime = bedtimeMin;
   if (effectiveBedtime <= startMin) effectiveBedtime += 1440;
 
+  // Hard ceiling constraint
   const hardCeiling = Math.min(endMin, effectiveBedtime);
   const totalAvailableMinutes = Math.max(0, hardCeiling - startMin);
 
-  // Use pre-parsed AI data if passed, otherwise run semantic AI analyzer
-  const aiAnalysis = aiParsedData || analyzeContextSemanticAI(urgentText, startTime, endTime, energy);
-  const rankedGoals = scoreAndRankGoals(goals, urgentText);
+  // Ranked goals with daily focus applied
+  const rankedGoals = scoreAndRankGoals(goals, selectedGoalId);
 
+  // Energy scaling
   let energyMultiplier = 1.0;
   let defaultBreakDuration = 10;
+  let maxGoalsToFit = 3;
+
   if (energy === 'low') {
     energyMultiplier = 0.75;
     defaultBreakDuration = 12;
+    maxGoalsToFit = 2;
   } else if (energy === 'high') {
     energyMultiplier = 1.2;
     defaultBreakDuration = 8;
+    maxGoalsToFit = 4;
   }
 
-  // --- CASE 1: FIXED TIME-ANCHORED COMMITMENTS (e.g. "meeting with YAC at 4pm") ---
-  const validAnchors = (aiAnalysis.anchoredEvents || []).filter(
-    (ev) => ev.startMinutes >= startMin && ev.startMinutes < hardCeiling
-  );
+  // --- 1. PROCESS BUSY TIME RANGES ---
+  const validBusyBlocks = [];
+  if (isBusy && Array.isArray(busyRanges)) {
+    busyRanges.forEach((range, idx) => {
+      if (!range.startTime || !range.endTime) return;
+      let bStart = parseTimeToMinutes(range.startTime);
+      let bEnd = parseTimeToMinutes(range.endTime);
 
-  let finalizedBlocks = [];
+      if (bEnd <= bStart) bEnd += 1440;
 
-  if (validAnchors.length > 0) {
-    const anchor = validAnchors[0];
-    const preAnchorSpan = Math.max(0, anchor.startMinutes - startMin);
-    const postAnchorSpan = Math.max(0, hardCeiling - anchor.endMinutes);
+      // Clamp within schedule window
+      const clampedStart = Math.max(startMin, Math.min(bStart, hardCeiling));
+      const clampedEnd = Math.max(clampedStart, Math.min(bEnd, hardCeiling));
+      const duration = clampedEnd - clampedStart;
 
-    // 1. Pre-Anchor Segment
-    let preBlocks = [];
-    let currentClock = startMin;
-
-    // AI Custom Tasks or Schoolwork before meeting
-    if (aiAnalysis.customAiBlocks?.length > 0) {
-      for (let aiBlock of aiAnalysis.customAiBlocks) {
-        if (aiBlock.goalId !== anchor.goalId && anchor.startMinutes - currentClock >= 35) {
-          const dur = Math.min(aiBlock.durationMinutes, anchor.startMinutes - currentClock - 10);
-          preBlocks.push({
-            type: 'goal',
-            goalId: aiBlock.goalId,
-            title: aiBlock.title,
-            icon: aiBlock.icon,
-            durationMinutes: dur,
-            tracked: true,
-            note: aiBlock.note
-          });
-          currentClock += dur;
-
-          if (currentClock + defaultBreakDuration < anchor.startMinutes) {
-            preBlocks.push({
-              type: 'break',
-              goalId: null,
-              title: 'Quick Reset',
-              icon: '☕',
-              durationMinutes: defaultBreakDuration,
-              tracked: false,
-              note: 'Mental recovery before meeting'
-            });
-            currentClock += defaultBreakDuration;
-          }
-          break;
-        }
+      if (duration > 0) {
+        validBusyBlocks.push({
+          id: `busy-${Date.now()}-${idx}`,
+          type: 'busy',
+          goalId: null,
+          title: range.label?.trim() || 'Busy',
+          icon: '🔒',
+          durationMinutes: duration,
+          startMinutes: clampedStart,
+          endMinutes: clampedEnd,
+          startTime: minutesToTimeString(clampedStart),
+          endTime: minutesToTimeString(clampedEnd),
+          tracked: false,
+          isBusy: true,
+          note: 'Unavailable · External plans'
+        });
       }
-    }
+    });
+  }
 
-    if (schoolworkMinutes > 0 && anchor.startMinutes - currentClock >= 30) {
-      const swMinutes = Math.min(schoolworkMinutes, anchor.startMinutes - currentClock - 5);
-      preBlocks.push({
-        type: 'schoolwork',
-        goalId: null,
-        title: 'AP Classwork & Study',
-        icon: '📚',
-        durationMinutes: swMinutes,
-        tracked: true,
-        note: 'Focused academic homework session'
+  // Sort busy blocks chronologically
+  validBusyBlocks.sort((a, b) => a.startMinutes - b.startMinutes);
+
+  // --- 2. CALCULATE FREE TIME SEGMENTS (Windows between busy periods) ---
+  const freeSegments = [];
+  let currentPointer = startMin;
+
+  validBusyBlocks.forEach((busy) => {
+    if (busy.startMinutes > currentPointer) {
+      freeSegments.push({
+        start: currentPointer,
+        end: busy.startMinutes,
+        duration: busy.startMinutes - currentPointer
       });
-      currentClock += swMinutes;
     }
+    currentPointer = Math.max(currentPointer, busy.endMinutes);
+  });
 
-    // 2. Fixed Anchor Block (at exact clock time)
-    const anchorBlock = {
-      ...anchor,
-      startMinutes: anchor.startMinutes,
-      endMinutes: anchor.endMinutes,
-      startTime: minutesToTimeString(anchor.startMinutes),
-      endTime: minutesToTimeString(anchor.endMinutes),
-      durationMinutes: anchor.durationMinutes
-    };
+  if (currentPointer < hardCeiling) {
+    freeSegments.push({
+      start: currentPointer,
+      end: hardCeiling,
+      duration: hardCeiling - currentPointer
+    });
+  }
 
-    // 3. Post-Anchor Segment
-    let postBlocks = [];
-    let postClock = anchor.endMinutes;
+  // Total free workable minutes across all segments
+  const totalFreeWorkableMinutes = freeSegments.reduce((sum, seg) => sum + seg.duration, 0);
 
-    if (postClock + defaultBreakDuration <= hardCeiling) {
-      postBlocks.push({
+  // --- 3. PREPARE DRAFT TASK QUEUE ---
+  const taskQueue = [];
+
+  // A. Schoolwork
+  if (schoolworkMinutes > 0) {
+    if (schoolworkMinutes > 75) {
+      const p1 = Math.round(schoolworkMinutes * 0.55);
+      const p2 = schoolworkMinutes - p1;
+      taskQueue.push({
+        type: 'schoolwork',
+        title: 'AP Classwork & Study (Part 1)',
+        icon: '📚',
+        durationMinutes: p1,
+        tracked: true,
+        note: 'Focused academic study session'
+      });
+      taskQueue.push({
         type: 'break',
-        goalId: null,
-        title: 'Post-Meeting Reset',
+        title: 'Quick Reset',
         icon: '☕',
         durationMinutes: defaultBreakDuration,
         tracked: false,
-        note: 'Short decompression after meeting'
+        note: 'Mental recovery between study blocks'
       });
-      postClock += defaultBreakDuration;
-    }
-
-    if (gymToday && postClock + 60 <= hardCeiling) {
-      postBlocks.push({
-        type: 'gym',
-        goalId: 'gym',
-        title: 'Gym & Strength Session',
-        icon: '🏋️',
-        durationMinutes: 60,
+      taskQueue.push({
+        type: 'schoolwork',
+        title: 'AP Classwork & Study (Part 2)',
+        icon: '📚',
+        durationMinutes: p2,
         tracked: true,
-        note: 'Protected evening training in 5–9 PM window'
+        note: 'Wrap up homework and deliverables'
       });
-      postClock += 60;
-
-      if (postClock + 35 <= hardCeiling) {
-        postBlocks.push({
-          type: 'dinner',
-          goalId: null,
-          title: 'Dinner & Food Recharge',
-          icon: '🍲',
-          durationMinutes: 35,
-          tracked: false,
-          note: 'Post-workout meal and personal recovery'
-        });
-        postClock += 35;
-      }
-    }
-
-    // Additional goals
-    const topGoals = rankedGoals.filter((g) => g.id !== anchor.goalId && g.id !== 'gym');
-    for (let g of topGoals) {
-      if (!preBlocks.some((pb) => pb.goalId === g.id) && postClock + 40 <= hardCeiling - freeTimeMinutes) {
-        postBlocks.push({
-          type: 'goal',
-          goalId: g.id,
-          title: g.name,
-          icon: g.icon,
-          durationMinutes: 45,
-          tracked: true,
-          note: `Evening focus block on ${g.name}`
-        });
-        postClock += 45;
-        break;
-      }
-    }
-
-    const remainingForFree = Math.max(30, hardCeiling - postClock);
-    postBlocks.push({
-      type: 'freetime',
-      goalId: null,
-      title: 'Free Time & Unwind',
-      icon: '🎮',
-      durationMinutes: Math.min(freeTimeMinutes || 60, remainingForFree),
-      tracked: false,
-      note: 'Guaranteed evening downtime before sleep'
-    });
-
-    finalizedBlocks = [...preBlocks, anchorBlock, ...postBlocks];
-
-    let timeIndex = startMin;
-    finalizedBlocks = finalizedBlocks.map((b, idx) => {
-      if (b.isFixedTime) {
-        timeIndex = b.endMinutes;
-        return {
-          id: `block-${Date.now()}-${idx}`,
-          ...b,
-          completed: false,
-          remainingMinutes: b.durationMinutes
-        };
-      }
-      const bStart = timeIndex;
-      const bEnd = bStart + b.durationMinutes;
-      timeIndex = bEnd;
-      return {
-        id: `block-${Date.now()}-${idx}`,
-        ...b,
-        startMinutes: bStart,
-        endMinutes: bEnd,
-        startTime: minutesToTimeString(bStart),
-        endTime: minutesToTimeString(bEnd),
-        completed: false,
-        remainingMinutes: b.durationMinutes
-      };
-    });
-
-  } else {
-    // --- CASE 2: TIME-FREE SEMANTIC AI SCHEDULING ---
-    // (e.g. "I have an AP Physics test tomorrow and need to write my ISEF proposal")
-    const blocksToSchedule = [];
-
-    // 1. Place AI Tailored Priority Tasks at the front when mental energy is highest
-    if (aiAnalysis.customAiBlocks && aiAnalysis.customAiBlocks.length > 0) {
-      for (let aiBlock of aiAnalysis.customAiBlocks) {
-        let dur = Math.round(aiBlock.durationMinutes * energyMultiplier);
-        dur = Math.max(30, Math.min(dur, 80));
-
-        blocksToSchedule.push({
-          type: 'goal',
-          goalId: aiBlock.goalId,
-          title: aiBlock.title,
-          icon: aiBlock.icon,
-          durationMinutes: dur,
-          tracked: true,
-          isAiPriority: true,
-          note: aiBlock.note
-        });
-
-        // Insert break after high intensity AI tasks
-        blocksToSchedule.push({
-          type: 'break',
-          goalId: null,
-          title: 'Mental Recovery Break',
-          icon: '☕',
-          durationMinutes: defaultBreakDuration,
-          tracked: false,
-          note: 'Transition and mental recharge'
-        });
-      }
-    }
-
-    // 2. Schoolwork (if not already fully covered by AI custom tasks)
-    const hasPhysicsOrCalcCustom = aiAnalysis.customAiBlocks?.some(b => 
-      b.title.includes('Physics') || b.title.includes('Calculus') || b.title.includes('Classwork')
-    );
-
-    if (schoolworkMinutes > 0 && !hasPhysicsOrCalcCustom) {
-      blocksToSchedule.push({
+    } else {
+      taskQueue.push({
         type: 'schoolwork',
         title: 'AP Classwork & Study',
         icon: '📚',
-        durationMinutes: Math.round(schoolworkMinutes * energyMultiplier),
+        durationMinutes: schoolworkMinutes,
         tracked: true,
-        note: 'Protected academic study block'
+        note: 'Protected academic block'
       });
+    }
+  }
 
-      blocksToSchedule.push({
+  // B. Selected Specific Goal (if any)
+  if (selectedGoalId && selectedGoalId !== 'none') {
+    const specificGoal = rankedGoals.find((g) => g.id === selectedGoalId);
+    if (specificGoal && specificGoal.id !== 'gym') {
+      let dur = Math.round((specificGoal.sessionMinutes || 45) * energyMultiplier);
+      dur = Math.max(30, Math.min(dur, 90));
+
+      if (taskQueue.length > 0 && taskQueue[taskQueue.length - 1].type !== 'break') {
+        taskQueue.push({
+          type: 'break',
+          title: 'Reset & Transition',
+          icon: '✨',
+          durationMinutes: defaultBreakDuration,
+          tracked: false,
+          note: 'Hydrate and transition to goal'
+        });
+      }
+
+      taskQueue.push({
+        type: 'goal',
+        goalId: specificGoal.id,
+        title: specificGoal.name,
+        icon: specificGoal.icon || '🎯',
+        durationMinutes: dur,
+        tracked: true,
+        note: 'Selected daily priority focus'
+      });
+    }
+  }
+
+  // C. Other Top Goals
+  const availableGoals = rankedGoals.filter((g) => g.id !== 'gym' && g.id !== selectedGoalId);
+  const remainingSlots = Math.max(1, maxGoalsToFit - (selectedGoalId !== 'none' ? 1 : 0));
+  const secondaryGoals = availableGoals.slice(0, remainingSlots);
+
+  for (let goal of secondaryGoals) {
+    let dur = Math.round((goal.sessionMinutes || 45) * energyMultiplier);
+    dur = Math.max(25, Math.min(dur, 60));
+
+    if (taskQueue.length > 0 && taskQueue[taskQueue.length - 1].type !== 'break') {
+      taskQueue.push({
         type: 'break',
         title: 'Reset & Transition',
         icon: '✨',
         durationMinutes: defaultBreakDuration,
         tracked: false,
-        note: 'Decompress and prepare for next project'
+        note: 'Short decompression break'
       });
     }
 
-    // 3. Life Goals (ISEF, ACT, Business, etc.)
-    const usedGoalIds = blocksToSchedule.map(b => b.goalId).filter(Boolean);
-    const availableGoals = rankedGoals.filter(g => g.id !== 'gym' && !usedGoalIds.includes(g.id));
-    const selectedGoals = availableGoals.slice(0, 2);
-
-    for (let goal of selectedGoals) {
-      let duration = Math.round((goal.sessionMinutes || 45) * energyMultiplier);
-      duration = Math.max(25, Math.min(duration, 60));
-
-      blocksToSchedule.push({
-        type: 'goal',
-        goalId: goal.id,
-        title: goal.name,
-        icon: goal.icon || '🎯',
-        durationMinutes: duration,
-        tracked: true,
-        note: goal.urgencyReason || (goal.deficit > 0 ? `Weekly target priority (${goal.completed}/${goal.weeklyTarget} ${goal.unit})` : 'Consistent progress')
-      });
-    }
-
-    // 4. Gym in 5-9pm window
-    if (gymToday) {
-      const gymBlock = {
-        type: 'gym',
-        goalId: 'gym',
-        title: 'Gym & Strength Session',
-        icon: '🏋️',
-        durationMinutes: 60,
-        tracked: true,
-        note: 'Protected physical training in preferred 5–9 PM window'
-      };
-      // Place near the middle of afternoon
-      const insertIdx = Math.min(2, blocksToSchedule.length);
-      blocksToSchedule.splice(insertIdx, 0, gymBlock);
-    }
-
-    // 5. Dinner (if afternoon spans >= 3.5h)
-    if (totalAvailableMinutes >= 210) {
-      const dinnerBlock = {
-        type: 'dinner',
-        title: 'Dinner & Food Recharge',
-        icon: '🍲',
-        durationMinutes: 35,
-        tracked: false,
-        note: 'Protected mealtime and personal recharge'
-      };
-      const dinnerInsertIdx = Math.floor(blocksToSchedule.length * 0.65);
-      blocksToSchedule.splice(Math.max(1, dinnerInsertIdx), 0, dinnerBlock);
-    }
-
-    // 6. Free Time (Protected at the end)
-    if (freeTimeMinutes > 0) {
-      blocksToSchedule.push({
-        type: 'freetime',
-        title: 'Free Time & Unwind',
-        icon: '🎮',
-        durationMinutes: freeTimeMinutes,
-        tracked: false,
-        note: 'Guaranteed evening downtime before sleep'
-      });
-    }
-
-    // Scale to fit available time window
-    let rawTotal = blocksToSchedule.reduce((acc, b) => acc + b.durationMinutes, 0);
-    if (rawTotal > totalAvailableMinutes && totalAvailableMinutes > 60) {
-      const factor = totalAvailableMinutes / rawTotal;
-      blocksToSchedule.forEach((b) => {
-        if (b.type === 'freetime') {
-          b.durationMinutes = Math.max(20, Math.round(b.durationMinutes * factor * 0.85));
-        } else if (b.type === 'break') {
-          b.durationMinutes = Math.max(5, Math.round(b.durationMinutes * factor));
-        } else {
-          b.durationMinutes = Math.max(20, Math.round(b.durationMinutes * factor));
-        }
-      });
-    }
-
-    // Assign sequential clock times
-    let clock = startMin;
-    finalizedBlocks = blocksToSchedule.map((b, index) => {
-      const bStart = clock;
-      const bEnd = clock + b.durationMinutes;
-      clock = bEnd;
-
-      return {
-        id: `block-${Date.now()}-${index}`,
-        ...b,
-        startMinutes: bStart,
-        endMinutes: bEnd,
-        startTime: minutesToTimeString(bStart),
-        endTime: minutesToTimeString(bEnd),
-        completed: false,
-        remainingMinutes: b.durationMinutes
-      };
+    taskQueue.push({
+      type: 'goal',
+      goalId: goal.id,
+      title: goal.name,
+      icon: goal.icon || '🎯',
+      durationMinutes: dur,
+      tracked: true,
+      note: goal.deficit > 0
+        ? `Weekly target progress (${goal.completed}/${goal.weeklyTarget} ${goal.unit})`
+        : 'Consistent junior year progress'
     });
   }
 
-  const totalFocusedMinutes = finalizedBlocks
+  // D. Gym Placement
+  if (gymToday) {
+    const gymGoal = rankedGoals.find((g) => g.id === 'gym') || {
+      id: 'gym',
+      name: 'Gym',
+      icon: '🏋️',
+      sessionMinutes: 60
+    };
+
+    const gymBlock = {
+      type: 'gym',
+      goalId: 'gym',
+      title: 'Gym & Strength Session',
+      icon: '🏋️',
+      durationMinutes: 60,
+      tracked: true,
+      note: 'Protected physical training session'
+    };
+
+    // Insert gym into task queue
+    if (taskQueue.length <= 2) {
+      taskQueue.push(gymBlock);
+    } else {
+      const insertPos = Math.min(2, taskQueue.length);
+      taskQueue.splice(insertPos, 0, gymBlock);
+    }
+  }
+
+  // E. Free Time (Protected at the end)
+  if (freeTimeMinutes > 0) {
+    taskQueue.push({
+      type: 'freetime',
+      title: 'Free Time & Unwind',
+      icon: '🎮',
+      durationMinutes: freeTimeMinutes,
+      tracked: false,
+      note: 'Guaranteed evening downtime before sleep'
+    });
+  }
+
+  // --- 4. FIT TASKS INTO FREE SEGMENTS & MERGE WITH BUSY BLOCKS ---
+  const allFinalBlocks = [];
+  let taskIndex = 0;
+
+  // Scale task durations if total queue exceeds free workable time
+  const rawQueueMinutes = taskQueue.reduce((acc, t) => acc + t.durationMinutes, 0);
+  if (rawQueueMinutes > totalFreeWorkableMinutes && totalFreeWorkableMinutes > 40) {
+    const scale = totalFreeWorkableMinutes / rawQueueMinutes;
+    taskQueue.forEach((t) => {
+      if (t.type === 'freetime') {
+        t.durationMinutes = Math.max(15, Math.round(t.durationMinutes * scale * 0.85));
+      } else if (t.type === 'break') {
+        t.durationMinutes = Math.max(5, Math.round(t.durationMinutes * scale));
+      } else {
+        t.durationMinutes = Math.max(20, Math.round(t.durationMinutes * scale));
+      }
+    });
+  }
+
+  // Sequentially fill free segments and insert busy blocks
+  let busyBlockIndex = 0;
+
+  freeSegments.forEach((segment) => {
+    let segClock = segment.start;
+
+    while (taskIndex < taskQueue.length && segClock < segment.end) {
+      const task = taskQueue[taskIndex];
+      const timeRemainingInSeg = segment.end - segClock;
+
+      if (timeRemainingInSeg < 15) {
+        // Not enough space for another task in this segment, leave small buffer
+        break;
+      }
+
+      const taskDuration = Math.min(task.durationMinutes, timeRemainingInSeg);
+
+      allFinalBlocks.push({
+        id: `block-${Date.now()}-${allFinalBlocks.length}`,
+        ...task,
+        durationMinutes: taskDuration,
+        startMinutes: segClock,
+        endMinutes: segClock + taskDuration,
+        startTime: minutesToTimeString(segClock),
+        endTime: minutesToTimeString(segClock + taskDuration),
+        completed: false,
+        remainingMinutes: taskDuration
+      });
+
+      segClock += taskDuration;
+      taskIndex++;
+    }
+
+    // Insert any busy block that starts at or after this segment
+    while (
+      busyBlockIndex < validBusyBlocks.length &&
+      validBusyBlocks[busyBlockIndex].startMinutes <= segment.end
+    ) {
+      const busy = validBusyBlocks[busyBlockIndex];
+      allFinalBlocks.push({
+        ...busy,
+        completed: false,
+        remainingMinutes: busy.durationMinutes
+      });
+      busyBlockIndex++;
+    }
+  });
+
+  // Append any remaining busy blocks
+  while (busyBlockIndex < validBusyBlocks.length) {
+    allFinalBlocks.push({
+      ...validBusyBlocks[busyBlockIndex],
+      completed: false,
+      remainingMinutes: validBusyBlocks[busyBlockIndex].durationMinutes
+    });
+    busyBlockIndex++;
+  }
+
+  // Sort finalized blocks chronologically
+  allFinalBlocks.sort((a, b) => a.startMinutes - b.startMinutes);
+
+  // Metrics
+  const totalFocusedMinutes = allFinalBlocks
     .filter((b) => b.tracked)
     .reduce((acc, b) => acc + b.durationMinutes, 0);
 
-  const finalEndTime = finalizedBlocks.length > 0
-    ? finalizedBlocks[finalizedBlocks.length - 1].endTime
+  const finalEndTime = allFinalBlocks.length > 0
+    ? allFinalBlocks[allFinalBlocks.length - 1].endTime
     : endTime;
 
+  // Selected goal summary text
+  let summaryText = 'Balanced afternoon schedule created by Orbit.';
+  if (selectedGoalId && selectedGoalId !== 'none') {
+    const chosen = rankedGoals.find((g) => g.id === selectedGoalId);
+    if (chosen) {
+      summaryText = `Orbit prioritized dedicated focus time for "${chosen.name}".`;
+    }
+  }
+  if (validBusyBlocks.length > 0) {
+    summaryText += ` Orbit protected your ${validBusyBlocks[0].startTime}–${validBusyBlocks[0].endTime} busy window.`;
+  }
+
   return {
-    blocks: finalizedBlocks,
+    blocks: allFinalBlocks,
     totalFocusedMinutes,
     totalFocusedFormatted: formatDuration(totalFocusedMinutes),
-    blockCount: finalizedBlocks.length,
+    blockCount: allFinalBlocks.length,
     scheduledStartTime: startTime,
     scheduledEndTime: finalEndTime,
     hardEndTime: endTime,
     bedtime: bedtime,
     energy,
-    contextSummary: aiAnalysis.summary,
-    hasUrgent: aiAnalysis.hasAiAnalysis,
-    aiNotes: aiAnalysis.aiNotes,
+    contextSummary: summaryText,
+    hasBusy: validBusyBlocks.length > 0,
     rankedGoals
   };
 }
@@ -479,7 +428,7 @@ export function generateOrbitSchedule({
 export function recalculateScheduleTimes(blocks, startMinutes) {
   let clock = startMinutes;
   return blocks.map((b) => {
-    if (b.isFixedTime) {
+    if (b.isBusy) {
       clock = b.endMinutes;
       return b;
     }
