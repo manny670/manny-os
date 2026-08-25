@@ -304,6 +304,7 @@ export default function Overview({
             return (
               <div
                 key={block.id || idx}
+                className="timeline-block"
                 style={{
                   display: 'flex',
                   alignItems: 'center',

@@ -70,7 +70,7 @@ export default function BreakModal({ isOpen, onClose, onConfirmBreak, currentTas
               Take a short break.
             </h3>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              Your progress on <span style={{ color: 'var(--accent-gold)', fontWeight: 600 }}>"{currentTaskTitle}"</span> will be saved and resumed immediately after.
+              Your progress on <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>"{currentTaskTitle}"</span> will be saved and resumed immediately after.
             </p>
           </div>
 
@@ -152,7 +152,7 @@ export default function BreakModal({ isOpen, onClose, onConfirmBreak, currentTas
               padding: '12px',
               borderRadius: 'var(--radius-md)',
               backgroundColor: 'var(--accent-emerald)',
-              color: '#08090C',
+              color: '#06070a',
               fontWeight: 700,
               fontSize: '0.88rem',
               display: 'flex',

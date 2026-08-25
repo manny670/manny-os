@@ -1,9 +1,16 @@
 /**
  * Orbit Deterministic Scheduling Engine
- * Balances priorities, schoolwork, specific goal selections, busy timeframes, gym, breaks, and protected end times.
+ * Generates human-paced, cleanly rounded schedules that seamlessly continue
+ * across busy blocks, respect gym time/duration/shower preferences, and protect end times.
  */
 
-import { parseTimeToMinutes, minutesToTimeString, formatDuration } from './timeHelpers';
+import {
+  parseTimeToMinutes,
+  minutesToTimeString,
+  formatDuration,
+  roundToCleanIncrement,
+  snapDurationToClean
+} from './timeHelpers.js';
 
 /**
  * Evaluates goals and produces ranked priorities based on user priority,
@@ -52,7 +59,8 @@ export function scoreAndRankGoals(goals = [], selectedGoalId = 'none') {
 }
 
 /**
- * Generates an Orbit schedule respecting hard constraints and busy periods.
+ * Generates an Orbit schedule with clean increments, seamless busy handling,
+ * customized gym timing, post-gym buffers, and natural breathing room.
  */
 export function generateOrbitSchedule({
   startTime = '1:00 PM',
@@ -64,12 +72,15 @@ export function generateOrbitSchedule({
   isBusy = false,
   busyRanges = [],
   gymToday = false,
+  gymStartTime = 'flexible', // 'flexible' | '5:00 PM' | '6:00 PM' | '7:00 PM' | custom string
+  gymDuration = 60,          // 45, 60, 75, 90, or custom
+  gymBufferMinutes = 15,     // shower / cooldown buffer after gym
   freeTimeMinutes = 60,
   goals = []
 }) {
-  const startMin = parseTimeToMinutes(startTime);
-  let endMin = parseTimeToMinutes(endTime);
-  const bedtimeMin = parseTimeToMinutes(bedtime);
+  const startMin = roundToCleanIncrement(parseTimeToMinutes(startTime), 5);
+  let endMin = roundToCleanIncrement(parseTimeToMinutes(endTime), 5);
+  const bedtimeMin = roundToCleanIncrement(parseTimeToMinutes(bedtime), 5);
 
   if (endMin <= startMin) endMin += 1440;
   let effectiveBedtime = bedtimeMin;
@@ -88,12 +99,12 @@ export function generateOrbitSchedule({
   let maxGoalsToFit = 3;
 
   if (energy === 'low') {
-    energyMultiplier = 0.75;
-    defaultBreakDuration = 12;
+    energyMultiplier = 0.8;
+    defaultBreakDuration = 15;
     maxGoalsToFit = 2;
   } else if (energy === 'high') {
-    energyMultiplier = 1.2;
-    defaultBreakDuration = 8;
+    energyMultiplier = 1.15;
+    defaultBreakDuration = 10;
     maxGoalsToFit = 4;
   }
 
@@ -102,8 +113,8 @@ export function generateOrbitSchedule({
   if (isBusy && Array.isArray(busyRanges)) {
     busyRanges.forEach((range, idx) => {
       if (!range.startTime || !range.endTime) return;
-      let bStart = parseTimeToMinutes(range.startTime);
-      let bEnd = parseTimeToMinutes(range.endTime);
+      let bStart = roundToCleanIncrement(parseTimeToMinutes(range.startTime), 5);
+      let bEnd = roundToCleanIncrement(parseTimeToMinutes(range.endTime), 5);
 
       if (bEnd <= bStart) bEnd += 1440;
 
@@ -135,7 +146,7 @@ export function generateOrbitSchedule({
   // Sort busy blocks chronologically
   validBusyBlocks.sort((a, b) => a.startMinutes - b.startMinutes);
 
-  // --- 2. CALCULATE FREE TIME SEGMENTS (Windows between busy periods) ---
+  // --- 2. CALCULATE WORKABLE FREE SEGMENTS (Windows before, between, and after busy blocks) ---
   const freeSegments = [];
   let currentPointer = startMin;
 
@@ -158,234 +169,346 @@ export function generateOrbitSchedule({
     });
   }
 
-  // Total free workable minutes across all segments
-  const totalFreeWorkableMinutes = freeSegments.reduce((sum, seg) => sum + seg.duration, 0);
-
-  // --- 3. PREPARE DRAFT TASK QUEUE ---
-  const taskQueue = [];
+  // --- 3. PREPARE WORK TASKS POOL ---
+  const workTasks = [];
 
   // A. Schoolwork
-  if (schoolworkMinutes > 0) {
-    if (schoolworkMinutes > 75) {
-      const p1 = Math.round(schoolworkMinutes * 0.55);
-      const p2 = schoolworkMinutes - p1;
-      taskQueue.push({
+  const cleanSchoolwork = snapDurationToClean(Math.round(schoolworkMinutes * energyMultiplier));
+  if (cleanSchoolwork > 0) {
+    if (cleanSchoolwork >= 75) {
+      const part1 = snapDurationToClean(Math.round(cleanSchoolwork * 0.55));
+      const part2 = snapDurationToClean(cleanSchoolwork - part1);
+      workTasks.push({
         type: 'schoolwork',
+        goalId: null,
         title: 'AP Classwork & Study (Part 1)',
         icon: '📚',
-        durationMinutes: p1,
+        durationMinutes: part1,
         tracked: true,
-        note: 'Focused academic study session'
+        note: 'Focused academic study block'
       });
-      taskQueue.push({
-        type: 'break',
-        title: 'Quick Reset',
-        icon: '☕',
-        durationMinutes: defaultBreakDuration,
-        tracked: false,
-        note: 'Mental recovery between study blocks'
-      });
-      taskQueue.push({
+      workTasks.push({
         type: 'schoolwork',
+        goalId: null,
         title: 'AP Classwork & Study (Part 2)',
         icon: '📚',
-        durationMinutes: p2,
+        durationMinutes: part2,
         tracked: true,
         note: 'Wrap up homework and deliverables'
       });
     } else {
-      taskQueue.push({
+      workTasks.push({
         type: 'schoolwork',
+        goalId: null,
         title: 'AP Classwork & Study',
         icon: '📚',
-        durationMinutes: schoolworkMinutes,
+        durationMinutes: cleanSchoolwork,
         tracked: true,
-        note: 'Protected academic block'
+        note: 'Protected academic study block'
       });
     }
   }
 
-  // B. Selected Specific Goal (if any)
+  // B. Selected Specific Goal
   if (selectedGoalId && selectedGoalId !== 'none') {
     const specificGoal = rankedGoals.find((g) => g.id === selectedGoalId);
     if (specificGoal && specificGoal.id !== 'gym') {
-      let dur = Math.round((specificGoal.sessionMinutes || 45) * energyMultiplier);
-      dur = Math.max(30, Math.min(dur, 90));
-
-      if (taskQueue.length > 0 && taskQueue[taskQueue.length - 1].type !== 'break') {
-        taskQueue.push({
-          type: 'break',
-          title: 'Reset & Transition',
-          icon: '✨',
-          durationMinutes: defaultBreakDuration,
-          tracked: false,
-          note: 'Hydrate and transition to goal'
-        });
-      }
-
-      taskQueue.push({
+      const gDur = snapDurationToClean(Math.round((specificGoal.sessionMinutes || 45) * energyMultiplier));
+      workTasks.push({
         type: 'goal',
         goalId: specificGoal.id,
         title: specificGoal.name,
         icon: specificGoal.icon || '🎯',
-        durationMinutes: dur,
+        durationMinutes: gDur,
         tracked: true,
         note: 'Selected daily priority focus'
       });
     }
   }
 
-  // C. Other Top Goals
+  // C. Ranked Secondary Goals
   const availableGoals = rankedGoals.filter((g) => g.id !== 'gym' && g.id !== selectedGoalId);
-  const remainingSlots = Math.max(1, maxGoalsToFit - (selectedGoalId !== 'none' ? 1 : 0));
-  const secondaryGoals = availableGoals.slice(0, remainingSlots);
+  const secondaryGoals = availableGoals.slice(0, maxGoalsToFit);
 
   for (let goal of secondaryGoals) {
-    let dur = Math.round((goal.sessionMinutes || 45) * energyMultiplier);
-    dur = Math.max(25, Math.min(dur, 60));
-
-    if (taskQueue.length > 0 && taskQueue[taskQueue.length - 1].type !== 'break') {
-      taskQueue.push({
-        type: 'break',
-        title: 'Reset & Transition',
-        icon: '✨',
-        durationMinutes: defaultBreakDuration,
-        tracked: false,
-        note: 'Short decompression break'
-      });
-    }
-
-    taskQueue.push({
+    const gDur = snapDurationToClean(Math.round((goal.sessionMinutes || 45) * energyMultiplier));
+    workTasks.push({
       type: 'goal',
       goalId: goal.id,
       title: goal.name,
       icon: goal.icon || '🎯',
-      durationMinutes: dur,
+      durationMinutes: gDur,
       tracked: true,
       note: goal.deficit > 0
-        ? `Weekly target progress (${goal.completed}/${goal.weeklyTarget} ${goal.unit})`
+        ? `Weekly progress (${goal.completed}/${goal.weeklyTarget} ${goal.unit})`
         : 'Consistent junior year progress'
     });
   }
 
-  // D. Gym Placement
+  // --- 4. PREPARE GYM & SHOWER SPECIFICATION ---
+  let gymSpec = null;
   if (gymToday) {
-    const gymGoal = rankedGoals.find((g) => g.id === 'gym') || {
-      id: 'gym',
-      name: 'Gym',
-      icon: '🏋️',
-      sessionMinutes: 60
-    };
-
-    const gymBlock = {
-      type: 'gym',
-      goalId: 'gym',
-      title: 'Gym & Strength Session',
-      icon: '🏋️',
-      durationMinutes: 60,
-      tracked: true,
-      note: 'Protected physical training session'
-    };
-
-    // Insert gym into task queue
-    if (taskQueue.length <= 2) {
-      taskQueue.push(gymBlock);
-    } else {
-      const insertPos = Math.min(2, taskQueue.length);
-      taskQueue.splice(insertPos, 0, gymBlock);
+    const cleanGymDur = snapDurationToClean(gymDuration || 60);
+    const cleanShowerDur = snapDurationToClean(gymBufferMinutes || 15);
+    
+    let preferredStartMin = null;
+    if (gymStartTime && gymStartTime !== 'flexible') {
+      preferredStartMin = roundToCleanIncrement(parseTimeToMinutes(gymStartTime), 5);
+      if (preferredStartMin < startMin || preferredStartMin >= hardCeiling) {
+        preferredStartMin = null; // fallback to flexible if out of bounds
+      }
     }
+
+    gymSpec = {
+      durationMinutes: cleanGymDur,
+      showerMinutes: cleanShowerDur,
+      preferredStartMin,
+      placed: false
+    };
   }
 
-  // E. Free Time (Protected at the end)
-  if (freeTimeMinutes > 0) {
-    taskQueue.push({
-      type: 'freetime',
-      title: 'Free Time & Unwind',
-      icon: '🎮',
-      durationMinutes: freeTimeMinutes,
-      tracked: false,
-      note: 'Guaranteed evening downtime before sleep'
-    });
-  }
-
-  // --- 4. FIT TASKS INTO FREE SEGMENTS & MERGE WITH BUSY BLOCKS ---
+  // --- 5. FILL SEGMENTS CHRONOLOGICALLY ---
   const allFinalBlocks = [];
-  let taskIndex = 0;
+  let workTaskIndex = 0;
 
-  // Scale task durations if total queue exceeds free workable time
-  const rawQueueMinutes = taskQueue.reduce((acc, t) => acc + t.durationMinutes, 0);
-  if (rawQueueMinutes > totalFreeWorkableMinutes && totalFreeWorkableMinutes > 40) {
-    const scale = totalFreeWorkableMinutes / rawQueueMinutes;
-    taskQueue.forEach((t) => {
-      if (t.type === 'freetime') {
-        t.durationMinutes = Math.max(15, Math.round(t.durationMinutes * scale * 0.85));
-      } else if (t.type === 'break') {
-        t.durationMinutes = Math.max(5, Math.round(t.durationMinutes * scale));
-      } else {
-        t.durationMinutes = Math.max(20, Math.round(t.durationMinutes * scale));
-      }
-    });
-  }
-
-  // Sequentially fill free segments and insert busy blocks
-  let busyBlockIndex = 0;
-
-  freeSegments.forEach((segment) => {
+  freeSegments.forEach((segment, segIdx) => {
+    const isLastSegment = segIdx === freeSegments.length - 1;
     let segClock = segment.start;
+    const segEnd = segment.end;
 
-    while (taskIndex < taskQueue.length && segClock < segment.end) {
-      const task = taskQueue[taskIndex];
-      const timeRemainingInSeg = segment.end - segClock;
+    // Check if Gym is requested in this segment
+    let placeGymHere = false;
+    let gymScheduledStart = null;
 
-      if (timeRemainingInSeg < 15) {
-        // Not enough space for another task in this segment, leave small buffer
-        break;
+    if (gymSpec && !gymSpec.placed) {
+      if (gymSpec.preferredStartMin !== null) {
+        if (gymSpec.preferredStartMin >= segClock && gymSpec.preferredStartMin + gymSpec.durationMinutes <= segEnd) {
+          placeGymHere = true;
+          gymScheduledStart = gymSpec.preferredStartMin;
+        }
+      } else {
+        const totalNeeded = gymSpec.durationMinutes + gymSpec.showerMinutes;
+        const isEveningSeg = segEnd >= 1020; // 5:00 PM or later
+        if ((isEveningSeg || isLastSegment) && segment.duration >= totalNeeded) {
+          placeGymHere = true;
+          const idealStart = Math.max(segClock, Math.min(1080, segEnd - totalNeeded)); // 6:00 PM = 1080
+          gymScheduledStart = roundToCleanIncrement(idealStart, 5);
+        }
       }
+    }
 
-      const taskDuration = Math.min(task.durationMinutes, timeRemainingInSeg);
+    // A. Fill tasks BEFORE Gym
+    if (placeGymHere && gymScheduledStart && gymScheduledStart > segClock) {
+      while (workTaskIndex < workTasks.length && segClock + 25 <= gymScheduledStart) {
+        const task = workTasks[workTaskIndex];
+        const space = gymScheduledStart - segClock;
+        const dur = Math.min(task.durationMinutes, space >= 40 ? snapDurationToClean(space - 10) : space);
+
+        allFinalBlocks.push({
+          id: `block-${Date.now()}-${allFinalBlocks.length}`,
+          ...task,
+          durationMinutes: dur,
+          startMinutes: segClock,
+          endMinutes: segClock + dur,
+          startTime: minutesToTimeString(segClock),
+          endTime: minutesToTimeString(segClock + dur),
+          completed: false,
+          remainingMinutes: dur
+        });
+
+        segClock += dur;
+        workTaskIndex++;
+
+        // Add short buffer if room before gym
+        if (segClock + defaultBreakDuration <= gymScheduledStart) {
+          allFinalBlocks.push({
+            id: `block-${Date.now()}-${allFinalBlocks.length}`,
+            type: 'break',
+            goalId: null,
+            title: 'Transition & Gear Up',
+            icon: '☕',
+            durationMinutes: defaultBreakDuration,
+            startMinutes: segClock,
+            endMinutes: segClock + defaultBreakDuration,
+            startTime: minutesToTimeString(segClock),
+            endTime: minutesToTimeString(segClock + defaultBreakDuration),
+            completed: false,
+            remainingMinutes: defaultBreakDuration,
+            tracked: false,
+            note: 'Get ready for gym'
+          });
+          segClock += defaultBreakDuration;
+        }
+      }
+      segClock = gymScheduledStart;
+    }
+
+    // B. Place Gym and Post-Gym Shower / Buffer
+    if (placeGymHere && !gymSpec.placed && segClock + gymSpec.durationMinutes <= segEnd) {
+      const gStart = segClock;
+      const gEnd = gStart + gymSpec.durationMinutes;
+
+      allFinalBlocks.push({
+        id: `block-${Date.now()}-${allFinalBlocks.length}`,
+        type: 'gym',
+        goalId: 'gym',
+        title: 'Gym & Strength Session',
+        icon: '🏋️',
+        durationMinutes: gymSpec.durationMinutes,
+        startMinutes: gStart,
+        endMinutes: gEnd,
+        startTime: minutesToTimeString(gStart),
+        endTime: minutesToTimeString(gEnd),
+        completed: false,
+        remainingMinutes: gymSpec.durationMinutes,
+        tracked: true,
+        note: 'Protected workout session'
+      });
+
+      segClock = gEnd;
+      gymSpec.placed = true;
+
+      // Post-Gym Shower & Cooldown buffer
+      if (gymSpec.showerMinutes > 0 && segClock + gymSpec.showerMinutes <= segEnd) {
+        const sStart = segClock;
+        const sEnd = sStart + gymSpec.showerMinutes;
+
+        allFinalBlocks.push({
+          id: `block-${Date.now()}-${allFinalBlocks.length}`,
+          type: 'break',
+          goalId: null,
+          title: 'Shower & Cooldown',
+          icon: '🚿',
+          durationMinutes: gymSpec.showerMinutes,
+          startMinutes: sStart,
+          endMinutes: sEnd,
+          startTime: minutesToTimeString(sStart),
+          endTime: minutesToTimeString(sEnd),
+          completed: false,
+          remainingMinutes: gymSpec.showerMinutes,
+          tracked: false,
+          note: 'Post-workout recovery and reset'
+        });
+
+        segClock = sEnd;
+      }
+    }
+
+    // C. Fill remaining tasks in this segment
+    const reservedFreeTime = isLastSegment ? snapDurationToClean(freeTimeMinutes || 60) : 0;
+    const taskCeiling = Math.max(segClock, segEnd - reservedFreeTime);
+
+    while (workTaskIndex < workTasks.length && segClock + 25 <= taskCeiling) {
+      const task = workTasks[workTaskIndex];
+      const space = taskCeiling - segClock;
+      const dur = Math.min(task.durationMinutes, space >= 40 ? snapDurationToClean(space - 10) : space);
 
       allFinalBlocks.push({
         id: `block-${Date.now()}-${allFinalBlocks.length}`,
         ...task,
-        durationMinutes: taskDuration,
+        durationMinutes: dur,
         startMinutes: segClock,
-        endMinutes: segClock + taskDuration,
+        endMinutes: segClock + dur,
         startTime: minutesToTimeString(segClock),
-        endTime: minutesToTimeString(segClock + taskDuration),
+        endTime: minutesToTimeString(segClock + dur),
         completed: false,
-        remainingMinutes: taskDuration
+        remainingMinutes: dur
       });
 
-      segClock += taskDuration;
-      taskIndex++;
+      segClock += dur;
+      workTaskIndex++;
+
+      // Insert clean 10-minute transition buffer between distinct work blocks
+      if (segClock + defaultBreakDuration <= taskCeiling && workTaskIndex < workTasks.length) {
+        allFinalBlocks.push({
+          id: `block-${Date.now()}-${allFinalBlocks.length}`,
+          type: 'break',
+          goalId: null,
+          title: 'Reset & Transition',
+          icon: '✨',
+          durationMinutes: defaultBreakDuration,
+          startMinutes: segClock,
+          endMinutes: segClock + defaultBreakDuration,
+          startTime: minutesToTimeString(segClock),
+          endTime: minutesToTimeString(segClock + defaultBreakDuration),
+          completed: false,
+          remainingMinutes: defaultBreakDuration,
+          tracked: false,
+          note: 'Short mental decompression'
+        });
+        segClock += defaultBreakDuration;
+      }
     }
 
-    // Insert any busy block that starts at or after this segment
-    while (
-      busyBlockIndex < validBusyBlocks.length &&
-      validBusyBlocks[busyBlockIndex].startMinutes <= segment.end
-    ) {
-      const busy = validBusyBlocks[busyBlockIndex];
+    // D. In the last segment: Place Protected Free Time & Wind-Down
+    if (isLastSegment) {
+      const remainingFree = Math.max(20, segEnd - segClock);
+      const cleanFree = snapDurationToClean(remainingFree);
+
+      allFinalBlocks.push({
+        id: `block-${Date.now()}-${allFinalBlocks.length}`,
+        type: 'freetime',
+        goalId: null,
+        title: 'Free Time & Unwind',
+        icon: '🎮',
+        durationMinutes: cleanFree,
+        startMinutes: segClock,
+        endMinutes: segClock + cleanFree,
+        startTime: minutesToTimeString(segClock),
+        endTime: minutesToTimeString(segClock + cleanFree),
+        completed: false,
+        remainingMinutes: cleanFree,
+        tracked: false,
+        note: 'Guaranteed evening downtime before sleep'
+      });
+      segClock += cleanFree;
+    } else if (segClock < segEnd) {
+      const gap = segEnd - segClock;
+      if (gap >= 10) {
+        const cleanGap = roundToCleanIncrement(gap, 5);
+        allFinalBlocks.push({
+          id: `block-${Date.now()}-${allFinalBlocks.length}`,
+          type: 'break',
+          goalId: null,
+          title: 'Breathing Room & Reset',
+          icon: '☕',
+          durationMinutes: cleanGap,
+          startMinutes: segClock,
+          endMinutes: segClock + cleanGap,
+          startTime: minutesToTimeString(segClock),
+          endTime: minutesToTimeString(segClock + cleanGap),
+          completed: false,
+          remainingMinutes: cleanGap,
+          tracked: false,
+          note: 'Buffer before upcoming plans'
+        });
+      }
+    }
+
+    // E. Insert any busy block that occurs right after this segment
+    validBusyBlocks.forEach((busy) => {
+      if (busy.startMinutes === segEnd) {
+        allFinalBlocks.push({
+          ...busy,
+          completed: false,
+          remainingMinutes: busy.durationMinutes
+        });
+      }
+    });
+  });
+
+  // Ensure all busy blocks are present in the final list
+  validBusyBlocks.forEach((busy) => {
+    if (!allFinalBlocks.some((b) => b.id === busy.id)) {
       allFinalBlocks.push({
         ...busy,
         completed: false,
         remainingMinutes: busy.durationMinutes
       });
-      busyBlockIndex++;
     }
   });
 
-  // Append any remaining busy blocks
-  while (busyBlockIndex < validBusyBlocks.length) {
-    allFinalBlocks.push({
-      ...validBusyBlocks[busyBlockIndex],
-      completed: false,
-      remainingMinutes: validBusyBlocks[busyBlockIndex].durationMinutes
-    });
-    busyBlockIndex++;
-  }
-
-  // Sort finalized blocks chronologically
+  // Sort finalized blocks strictly chronologically
   allFinalBlocks.sort((a, b) => a.startMinutes - b.startMinutes);
 
   // Metrics
@@ -397,16 +520,19 @@ export function generateOrbitSchedule({
     ? allFinalBlocks[allFinalBlocks.length - 1].endTime
     : endTime;
 
-  // Selected goal summary text
-  let summaryText = 'Balanced afternoon schedule created by Orbit.';
+  // Context Summary
+  let summaryText = 'Human-paced afternoon schedule with built-in recovery.';
   if (selectedGoalId && selectedGoalId !== 'none') {
     const chosen = rankedGoals.find((g) => g.id === selectedGoalId);
     if (chosen) {
-      summaryText = `Orbit prioritized dedicated focus time for "${chosen.name}".`;
+      summaryText = `Prioritized "${chosen.name}" with dedicated focus time.`;
     }
   }
+  if (gymToday && gymSpec?.placed) {
+    summaryText += ` Gym scheduled with a post-workout shower reset.`;
+  }
   if (validBusyBlocks.length > 0) {
-    summaryText += ` Orbit protected your ${validBusyBlocks[0].startTime}–${validBusyBlocks[0].endTime} busy window.`;
+    summaryText += ` Seamlessly scheduled around your ${validBusyBlocks[0].startTime}–${validBusyBlocks[0].endTime} busy window.`;
   }
 
   return {
@@ -425,23 +551,105 @@ export function generateOrbitSchedule({
   };
 }
 
-export function recalculateScheduleTimes(blocks, startMinutes) {
-  let clock = startMinutes;
-  return blocks.map((b) => {
-    if (b.isBusy) {
-      clock = b.endMinutes;
-      return b;
+/**
+ * Robustly recalculates timestamps for all blocks starting from a clean start time.
+ * Handles busy blocks (which act as fixed immovable anchors) and pushes flexible
+ * blocks smoothly without ever outputting NaN or N/A.
+ */
+export function recalculateScheduleTimes(blocks = [], startMinutes = 780) {
+  if (!Array.isArray(blocks) || blocks.length === 0) return [];
+
+  let clock = roundToCleanIncrement(typeof startMinutes === 'number' && !isNaN(startMinutes) ? startMinutes : 780, 5);
+
+  return blocks.map((block) => {
+    const dur = typeof block.durationMinutes === 'number' && !isNaN(block.durationMinutes) && block.durationMinutes > 0
+      ? block.durationMinutes
+      : 15;
+
+    // Busy blocks are fixed anchors at their predetermined clock time
+    if (block.isBusy || block.type === 'busy') {
+      const bStart = typeof block.startMinutes === 'number' && !isNaN(block.startMinutes)
+        ? block.startMinutes
+        : clock;
+      const bEnd = typeof block.endMinutes === 'number' && !isNaN(block.endMinutes)
+        ? block.endMinutes
+        : bStart + dur;
+
+      clock = Math.max(clock, bEnd);
+
+      return {
+        ...block,
+        durationMinutes: bEnd - bStart,
+        startMinutes: bStart,
+        endMinutes: bEnd,
+        startTime: minutesToTimeString(bStart),
+        endTime: minutesToTimeString(bEnd)
+      };
     }
+
     const bStart = clock;
-    const bEnd = clock + b.durationMinutes;
+    const bEnd = bStart + dur;
     clock = bEnd;
 
     return {
-      ...b,
+      ...block,
+      durationMinutes: dur,
       startMinutes: bStart,
       endMinutes: bEnd,
       startTime: minutesToTimeString(bStart),
       endTime: minutesToTimeString(bEnd)
     };
   });
+}
+
+/**
+ * Intelligent schedule adjustment engine for extending tasks (+15m / +30m)
+ * Absorbs extra time from downstream Free Time or buffers when possible,
+ * or extends day end time without breaking busy blocks or creating invalid times.
+ */
+export function adjustScheduleForExtendedBlock(blocks = [], activeIndex = 0, addedMinutes = 15, hardEndTimeStr = '9:30 PM', bedtimeStr = '10:30 PM') {
+  if (!blocks || blocks.length === 0 || activeIndex >= blocks.length) {
+    return { success: false, blocks, message: 'Invalid schedule blocks' };
+  }
+
+  const hardCeilingMin = parseTimeToMinutes(hardEndTimeStr);
+  const bedtimeMin = parseTimeToMinutes(bedtimeStr);
+  const maxAllowableCeiling = Math.max(hardCeilingMin, bedtimeMin);
+
+  const updatedBlocks = blocks.map((b, idx) => ({ ...b }));
+  const targetBlock = updatedBlocks[activeIndex];
+
+  targetBlock.durationMinutes = (targetBlock.durationMinutes || 30) + addedMinutes;
+  targetBlock.remainingMinutes = (targetBlock.remainingMinutes || targetBlock.durationMinutes) + addedMinutes;
+
+  // Check if we can borrow from downstream Free Time (to preserve user's end time)
+  let timeToAbsorb = addedMinutes;
+  for (let i = updatedBlocks.length - 1; i > activeIndex; i--) {
+    if (timeToAbsorb <= 0) break;
+    const b = updatedBlocks[i];
+    if (b.type === 'freetime' && b.durationMinutes > 20) {
+      const reduction = Math.min(timeToAbsorb, b.durationMinutes - 15);
+      b.durationMinutes -= reduction;
+      timeToAbsorb -= reduction;
+    }
+  }
+
+  // Recalculate timestamps starting from the first block's start time
+  const recalculated = recalculateScheduleTimes(updatedBlocks, updatedBlocks[0]?.startMinutes || 780);
+  const finalEndMin = recalculated[recalculated.length - 1]?.endMinutes || 0;
+
+  // If final end time exceeds max allowable ceiling
+  if (finalEndMin > maxAllowableCeiling + 15) {
+    return {
+      success: false,
+      blocks,
+      message: `Cannot extend further without passing your bedtime (${bedtimeStr}).`
+    };
+  }
+
+  return {
+    success: true,
+    blocks: recalculated,
+    message: `Added +${addedMinutes}m to "${targetBlock.title}".`
+  };
 }

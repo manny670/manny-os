@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Play,
   Pause,
@@ -14,6 +14,8 @@ import {
   Lock
 } from 'lucide-react';
 import { formatDuration } from '../utils/timeHelpers';
+
+const TIMER_STORAGE_KEY = 'orbitActiveTimer';
 
 export default function Focus({
   planState,
@@ -34,39 +36,148 @@ export default function Focus({
   const [secondsRemaining, setSecondsRemaining] = useState(
     (currentBlock?.remainingMinutes || currentBlock?.durationMinutes || 45) * 60
   );
-
-  const initialTotalSecondsRef = useRef(
+  const [totalBlockSeconds, setTotalBlockSeconds] = useState(
     (currentBlock?.durationMinutes || 45) * 60
   );
 
-  // Sync timer when active block or remainingMinutes changes
+  // Timestamp references for real-world elapsed time tracking across backgrounding / phone locking
+  const timerStateRef = useRef({
+    blockId: currentBlock?.id || null,
+    targetTotalSeconds: (currentBlock?.durationMinutes || 45) * 60,
+    startTimeStamp: Date.now(),
+    elapsedBeforeResume: 0,
+    isRunning: true
+  });
+
+  // Calculate current exact remaining seconds based on real-time timestamps
+  const computeExactRemainingSeconds = useCallback(() => {
+    const state = timerStateRef.current;
+    if (!state.blockId) return 0;
+
+    let totalElapsed = state.elapsedBeforeResume;
+    if (state.isRunning && state.startTimeStamp) {
+      const currentSessionSec = Math.max(0, Math.floor((Date.now() - state.startTimeStamp) / 1000));
+      totalElapsed += currentSessionSec;
+    }
+
+    return Math.max(0, state.targetTotalSeconds - totalElapsed);
+  }, []);
+
+  // Sync / Initialize timer when active block changes
   useEffect(() => {
-    if (currentBlock) {
-      const initialSec = (currentBlock.remainingMinutes ?? currentBlock.durationMinutes ?? 45) * 60;
-      setSecondsRemaining(initialSec);
-      initialTotalSecondsRef.current = (currentBlock.durationMinutes || 45) * 60;
+    if (!currentBlock) return;
+
+    const blockId = currentBlock.id;
+    const blockDurationSec = (currentBlock.durationMinutes || 45) * 60;
+    const initialRemainingSec = (currentBlock.remainingMinutes ?? currentBlock.durationMinutes ?? 45) * 60;
+
+    setTotalBlockSeconds(blockDurationSec);
+
+    // Check stored timer state
+    let loadedFromStorage = false;
+    try {
+      const stored = localStorage.getItem(TIMER_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.blockId === blockId) {
+          timerStateRef.current = {
+            blockId,
+            targetTotalSeconds: parsed.targetTotalSeconds || blockDurationSec,
+            startTimeStamp: parsed.startTimeStamp || Date.now(),
+            elapsedBeforeResume: parsed.elapsedBeforeResume || 0,
+            isRunning: parsed.isRunning !== false
+          };
+          setIsRunning(parsed.isRunning !== false);
+          loadedFromStorage = true;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    if (!loadedFromStorage) {
+      const elapsedAlready = Math.max(0, blockDurationSec - initialRemainingSec);
+      timerStateRef.current = {
+        blockId,
+        targetTotalSeconds: blockDurationSec,
+        startTimeStamp: Date.now(),
+        elapsedBeforeResume: elapsedAlready,
+        isRunning: true
+      };
+      setIsRunning(true);
+      try {
+        localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify(timerStateRef.current));
+      } catch (e) {}
+    }
+
+    const exact = computeExactRemainingSeconds();
+    setSecondsRemaining(exact);
+  }, [currentBlock?.id, currentBlock?.remainingMinutes, currentBlock?.durationMinutes, computeExactRemainingSeconds]);
+
+  // Main real-time timestamp interval loop & visibilitychange / phone unlock listener
+  useEffect(() => {
+    const updateTick = () => {
+      const exact = computeExactRemainingSeconds();
+      setSecondsRemaining(exact);
+    };
+
+    // Run tick on interval
+    const interval = setInterval(updateTick, 500);
+
+    // Listen for tab focus, phone unlock, visibility change to immediately catch up 30m elapsed
+    const handleVisibilityOrFocus = () => {
+      updateTick();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
+  }, [computeExactRemainingSeconds]);
+
+  // Handle Play / Pause with timestamp preservation
+  const handleTogglePlayPause = () => {
+    const state = timerStateRef.current;
+    if (isRunning) {
+      // Pause
+      const currentSessionSec = Math.max(0, Math.floor((Date.now() - state.startTimeStamp) / 1000));
+      state.elapsedBeforeResume += currentSessionSec;
+      state.isRunning = false;
+      state.startTimeStamp = null;
+      setIsRunning(false);
+    } else {
+      // Resume
+      state.startTimeStamp = Date.now();
+      state.isRunning = true;
       setIsRunning(true);
     }
-  }, [currentBlock?.id, currentBlock?.remainingMinutes, currentBlock?.durationMinutes]);
 
-  // Countdown timer loop
-  useEffect(() => {
-    let interval = null;
-    if (isRunning && secondsRemaining > 0) {
-      interval = setInterval(() => {
-        setSecondsRemaining((prev) => {
-          if (prev <= 1) {
-            clearInterval(interval);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isRunning, secondsRemaining]);
+    try {
+      localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {}
+
+    const exact = computeExactRemainingSeconds();
+    setSecondsRemaining(exact);
+  };
+
+  // Clean up timer storage when completing / canceling
+  const handleBlockCompletion = () => {
+    try {
+      localStorage.removeItem(TIMER_STORAGE_KEY);
+    } catch (e) {}
+    onCompleteBlock(currentBlock);
+  };
+
+  const handleBlockCancellation = () => {
+    try {
+      localStorage.removeItem(TIMER_STORAGE_KEY);
+    } catch (e) {}
+    onCancelBlock(currentBlock);
+  };
 
   if (!currentBlock) {
     return (
@@ -99,7 +210,7 @@ export default function Focus({
     0,
     Math.min(
       100,
-      100 - (secondsRemaining / (initialTotalSecondsRef.current || 1)) * 100
+      100 - (secondsRemaining / (totalBlockSeconds || 1)) * 100
     )
   );
 
@@ -307,7 +418,7 @@ export default function Focus({
         {/* Primary Controls: Play/Pause & Complete */}
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '14px', marginBottom: '24px' }}>
           <button
-            onClick={() => setIsRunning(!isRunning)}
+            onClick={handleTogglePlayPause}
             style={{
               padding: '14px 28px',
               borderRadius: 'var(--radius-lg)',
@@ -355,7 +466,7 @@ export default function Focus({
             </button>
           ) : (
             <button
-              onClick={() => onCompleteBlock(currentBlock)}
+              onClick={handleBlockCompletion}
               style={{
                 padding: '14px 28px',
                 borderRadius: 'var(--radius-lg)',
@@ -475,7 +586,7 @@ export default function Focus({
 
             {/* Cancel Block */}
             <button
-              onClick={() => onCancelBlock(currentBlock)}
+              onClick={handleBlockCancellation}
               style={{
                 padding: '8px 14px',
                 borderRadius: 'var(--radius-md)',

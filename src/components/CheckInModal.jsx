@@ -12,7 +12,8 @@ import {
   Plus,
   Trash2,
   Check,
-  Target
+  Target,
+  Bath
 } from 'lucide-react';
 import { getCurrentTimeString } from '../utils/timeHelpers';
 
@@ -39,7 +40,12 @@ export default function CheckInModal({
     { id: 'busy-1', startTime: '5:00 PM', endTime: '8:00 PM', label: 'Busy' }
   ]);
 
+  // Gym Scheduling Preferences
   const [gymToday, setGymToday] = useState(true);
+  const [gymStartTime, setGymStartTime] = useState('flexible'); // 'flexible' | '5:00 PM' | '6:00 PM' | '7:00 PM' | custom string
+  const [gymDuration, setGymDuration] = useState(60); // 45, 60, 75, 90
+  const [gymBufferMinutes, setGymBufferMinutes] = useState(15); // 0, 15, 20
+
   const [freeTimeMinutes, setFreeTimeMinutes] = useState(60);
 
   useEffect(() => {
@@ -58,6 +64,9 @@ export default function CheckInModal({
             : [{ id: 'busy-1', startTime: '5:00 PM', endTime: '8:00 PM', label: 'Busy' }]
         );
         setGymToday(initialValues.gymToday ?? true);
+        setGymStartTime(initialValues.gymStartTime || 'flexible');
+        setGymDuration(initialValues.gymDuration ?? 60);
+        setGymBufferMinutes(initialValues.gymBufferMinutes ?? 15);
         setFreeTimeMinutes(initialValues.freeTimeMinutes ?? 60);
       } else if (isHomeTrigger) {
         setStartTime(getCurrentTimeString());
@@ -97,6 +106,9 @@ export default function CheckInModal({
       isBusy,
       busyRanges: isBusy ? busyRanges : [],
       gymToday,
+      gymStartTime,
+      gymDuration: Number(gymDuration),
+      gymBufferMinutes: Number(gymBufferMinutes),
       freeTimeMinutes
     });
   };
@@ -109,6 +121,13 @@ export default function CheckInModal({
     { label: '3h+', value: 180 }
   ];
 
+  const gymDurationOptions = [
+    { label: '45 min', value: 45 },
+    { label: '1 hour', value: 60 },
+    { label: '1h 15m', value: 75 },
+    { label: '1h 30m', value: 90 }
+  ];
+
   const freeTimeOptions = [
     { label: '30 min', value: 30 },
     { label: '1 hour', value: 60 },
@@ -116,8 +135,9 @@ export default function CheckInModal({
     { label: '2 hours', value: 120 }
   ];
 
-  const startTimePresets = ['Now', '1:00 PM', '3:00 PM', '4:00 PM', '4:30 PM'];
+  const startTimePresets = ['Now', '1:00 PM', '3:00 PM', '4:00 PM', '4:30 PM', '5:00 PM'];
   const endTimePresets = ['8:30 PM', '9:00 PM', '9:30 PM', '10:00 PM', '10:30 PM'];
+  const gymTimePresets = ['Flexible', '5:00 PM', '6:00 PM', '7:00 PM', '7:30 PM', '8:00 PM'];
 
   return (
     <div
@@ -201,7 +221,7 @@ export default function CheckInModal({
                 marginTop: '3px'
               }}
             >
-              Orbit will build your schedule around your priorities and busy hours.
+              Orbit will build your schedule around your priorities, gym, and busy hours.
             </p>
           </div>
 
@@ -257,7 +277,7 @@ export default function CheckInModal({
                   marginBottom: '14px'
                 }}
               >
-                Pick a goal to prioritize today, or let Orbit’s algorithm balance your weekly commitments.
+                Pick a goal to prioritize today, or let Orbit balance your weekly commitments.
               </p>
 
               {/* Selectable Goal Cards / Pills Grid */}
@@ -420,7 +440,7 @@ export default function CheckInModal({
                   marginBottom: isBusy ? '16px' : '0'
                 }}
               >
-                Block out unavailable time (e.g. 5:00 PM–8:00 PM for sports, appointments, or events). Orbit will work around them.
+                Block out unavailable time (e.g. 6:00 PM–7:00 PM for sports, appointments, or events). Orbit schedules around them and continues afterward.
               </p>
 
               {/* Busy Time Range Inputs */}
@@ -448,7 +468,7 @@ export default function CheckInModal({
                           type="text"
                           value={range.startTime}
                           onChange={(e) => handleUpdateBusyRange(range.id, 'startTime', e.target.value)}
-                          placeholder="5:00 PM"
+                          placeholder="6:00 PM"
                           style={{
                             width: '100%',
                             padding: '8px 10px',
@@ -471,7 +491,7 @@ export default function CheckInModal({
                           type="text"
                           value={range.endTime}
                           onChange={(e) => handleUpdateBusyRange(range.id, 'endTime', e.target.value)}
-                          placeholder="8:00 PM"
+                          placeholder="7:00 PM"
                           style={{
                             width: '100%',
                             padding: '8px 10px',
@@ -582,7 +602,7 @@ export default function CheckInModal({
                     type="text"
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
-                    placeholder="e.g. 1:00 PM"
+                    placeholder="e.g. 4:30 PM"
                     style={{
                       width: '100%',
                       padding: '8px 12px',
@@ -826,68 +846,229 @@ export default function CheckInModal({
               </div>
             </div>
 
-            {/* 6. GYM TODAY? */}
+            {/* 6. GYM SCHEDULING (TIME, DURATION & SHOWER BUFFER) */}
             <div
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
                 backgroundColor: 'var(--bg-surface)',
-                padding: '16px 20px',
+                padding: '20px',
                 borderRadius: 'var(--radius-lg)',
-                border: '1px solid var(--border-hairline)'
+                border: '1px solid var(--border-hairline)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '16px'
               }}
             >
-              <div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    fontSize: '0.9rem',
-                    fontWeight: 600,
-                    color: 'var(--text-primary)'
-                  }}
-                >
-                  <Dumbbell size={16} style={{ color: 'var(--accent-coral)' }} />
-                  <span>Gym today?</span>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px'
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '0.92rem',
+                      fontWeight: 700,
+                      color: 'var(--text-primary)'
+                    }}
+                  >
+                    <Dumbbell size={17} style={{ color: 'var(--accent-coral)' }} />
+                    <span>Gym today?</span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '0.76rem',
+                      color: 'var(--text-muted)',
+                      marginTop: '2px'
+                    }}
+                  >
+                    Set your preferred workout start time and duration.
+                  </div>
                 </div>
-                <div
-                  style={{
-                    fontSize: '0.76rem',
-                    color: 'var(--text-muted)',
-                    marginTop: '2px'
-                  }}
-                >
-                  Orbit protects a 60m workout in your preferred 5–9 PM evening window.
+
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {['Yes', 'No'].map((choice) => {
+                    const val = choice === 'Yes';
+                    const isSelected = gymToday === val;
+                    return (
+                      <button
+                        key={choice}
+                        type="button"
+                        onClick={() => setGymToday(val)}
+                        style={{
+                          padding: '8px 18px',
+                          borderRadius: 'var(--radius-pill)',
+                          backgroundColor: isSelected ? 'var(--accent-primary)' : 'var(--bg-card)',
+                          color: isSelected ? '#06070a' : 'var(--text-secondary)',
+                          fontWeight: 700,
+                          fontSize: '0.82rem',
+                          border: isSelected ? 'none' : '1px solid var(--border-hairline)',
+                          transition: 'all 0.18s ease'
+                        }}
+                      >
+                        {choice}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '6px' }}>
-                {['Yes', 'No'].map((choice) => {
-                  const val = choice === 'Yes';
-                  const isSelected = gymToday === val;
-                  return (
-                    <button
-                      key={choice}
-                      type="button"
-                      onClick={() => setGymToday(val)}
+              {gymToday && (
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-card)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '16px',
+                    border: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '16px'
+                  }}
+                >
+                  {/* Gym Preferred Start Time */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                      What time do you want to go to the gym?
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                      <Clock size={15} style={{ color: 'var(--accent-coral)' }} />
+                      <input
+                        type="text"
+                        value={gymStartTime === 'flexible' ? '' : gymStartTime}
+                        onChange={(e) => setGymStartTime(e.target.value || 'flexible')}
+                        placeholder="e.g. 7:00 PM (or Flexible)"
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'var(--bg-primary)',
+                          border: '1px solid var(--border-subtle)',
+                          color: 'var(--text-primary)',
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '0.9rem',
+                          fontWeight: 600
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {gymTimePresets.map((preset) => {
+                        const isPresetActive =
+                          preset === 'Flexible'
+                            ? gymStartTime === 'flexible'
+                            : gymStartTime === preset;
+                        return (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setGymStartTime(preset === 'Flexible' ? 'flexible' : preset)}
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: 'var(--radius-sm)',
+                              fontSize: '0.74rem',
+                              fontWeight: 600,
+                              backgroundColor: isPresetActive ? 'var(--accent-coral)' : 'var(--bg-primary)',
+                              color: isPresetActive ? '#06070a' : 'var(--text-secondary)',
+                              border: isPresetActive ? 'none' : '1px solid var(--border-hairline)',
+                              transition: 'all 0.16s ease'
+                            }}
+                          >
+                            {preset}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Gym Duration Options */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                      Expected workout duration
+                    </label>
+                    <div
                       style={{
-                        padding: '8px 18px',
-                        borderRadius: 'var(--radius-pill)',
-                        backgroundColor: isSelected ? 'var(--accent-primary)' : 'var(--bg-card)',
-                        color: isSelected ? '#06070a' : 'var(--text-secondary)',
-                        fontWeight: 700,
-                        fontSize: '0.82rem',
-                        border: isSelected ? 'none' : '1px solid var(--border-hairline)',
-                        transition: 'all 0.18s ease'
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))',
+                        gap: '8px'
                       }}
                     >
-                      {choice}
-                    </button>
-                  );
-                })}
-              </div>
+                      {gymDurationOptions.map((opt) => {
+                        const isSelected = gymDuration === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => setGymDuration(opt.value)}
+                            style={{
+                              padding: '8px 6px',
+                              borderRadius: 'var(--radius-sm)',
+                              backgroundColor: isSelected ? 'var(--accent-primary)' : 'var(--bg-primary)',
+                              border: isSelected ? 'none' : '1px solid var(--border-hairline)',
+                              color: isSelected ? '#06070a' : 'var(--text-secondary)',
+                              fontSize: '0.8rem',
+                              fontWeight: isSelected ? 700 : 500,
+                              transition: 'all 0.18s ease'
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Post-Gym Shower & Cooldown Buffer */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      paddingTop: '8px',
+                      borderTop: '1px solid var(--border-hairline)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Bath size={15} style={{ color: 'var(--accent-emerald)' }} />
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                        Post-workout shower & cooldown buffer:
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      {[
+                        { label: 'None', val: 0 },
+                        { label: '15m', val: 15 },
+                        { label: '20m', val: 20 }
+                      ].map((buf) => {
+                        const isBufSelected = gymBufferMinutes === buf.val;
+                        return (
+                          <button
+                            key={buf.label}
+                            type="button"
+                            onClick={() => setGymBufferMinutes(buf.val)}
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: 'var(--radius-sm)',
+                              fontSize: '0.72rem',
+                              fontWeight: 600,
+                              backgroundColor: isBufSelected ? 'var(--accent-emerald)' : 'var(--bg-primary)',
+                              color: isBufSelected ? '#06070a' : 'var(--text-secondary)',
+                              border: isBufSelected ? 'none' : '1px solid var(--border-hairline)'
+                            }}
+                          >
+                            {buf.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* 7. DESIRED FREE TIME */}
