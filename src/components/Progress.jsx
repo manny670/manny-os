@@ -16,6 +16,8 @@ export default function Progress({
   goals,
   activity,
   totalTrackedMinutes,
+  startedCount = 0,
+  finishedCount = 0,
   onUndoActivity,
   onResetWeeklyProgress
 }) {
@@ -135,6 +137,25 @@ export default function Progress({
           </div>
           <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
             Focus blocks finished
+          </div>
+        </div>
+
+        <div
+          style={{
+            backgroundColor: 'var(--bg-surface)',
+            border: '1px solid var(--border-hairline)',
+            borderRadius: 'var(--radius-xl)',
+            padding: '24px'
+          }}
+        >
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+            Started vs Finished
+          </div>
+          <div style={{ fontSize: '2.2rem', fontWeight: 800, color: 'var(--accent-emerald)', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
+            {finishedCount} <span style={{ fontSize: '1.2rem', color: 'var(--text-muted)', fontWeight: 600 }}>/ {startedCount || totalSessions}</span>
+          </div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+            Follow-through rate
           </div>
         </div>
 

@@ -284,7 +284,7 @@ export default function Today({
                 marginBottom: '14px'
               }}
             >
-              Let Orbit decide what deserves your time today.
+              "Your life doesn't need a blueprint. You just need to decide what's next."
             </h2>
 
             <p
@@ -296,7 +296,7 @@ export default function Today({
                 maxWidth: '520px'
               }}
             >
-              Time, energy, priorities, school, and your real life — all considered together.
+              Build your schedule one block at a time. Pick what matters, set the duration, and take control of your day.
             </p>
 
             {/* Dynamic CTA depending on Day State */}
@@ -310,7 +310,7 @@ export default function Today({
                   padding: '16px 28px',
                   borderRadius: 'var(--radius-lg)',
                   backgroundColor: 'var(--accent-primary)',
-                  color: '#08090C',
+                  color: '#06070a',
                   fontSize: '1rem',
                   fontWeight: 700,
                   boxShadow: '0 4px 20px rgba(56, 189, 248, 0.25)',
@@ -326,7 +326,7 @@ export default function Today({
                 }}
               >
                 <Sparkles size={18} />
-                <span>Build my day →</span>
+                <span>Build My Day (Block by Block) →</span>
               </button>
             )}
 

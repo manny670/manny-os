@@ -11,20 +11,20 @@ import {
   saveStoredActivity,
   getStoredPlan,
   saveStoredPlan
-} from './utils/storage';
+} from './utils/storage.js';
 import {
   scoreAndRankGoals,
-  generateOrbitSchedule,
+  buildScheduleFromUserBlocks,
   recalculateScheduleTimes,
   adjustScheduleForExtendedBlock
-} from './utils/scheduler';
+} from './utils/scheduler.js';
 import {
   parseTimeToMinutes,
   minutesToTimeString,
   getCurrentTimeString,
   getCurrentTimeMinutes,
   roundToCleanIncrement
-} from './utils/timeHelpers';
+} from './utils/timeHelpers.js';
 
 // Components
 import BackgroundParticles from './components/BackgroundParticles';
@@ -73,14 +73,14 @@ export default function App() {
   const totalTrackedMinutes = activity.reduce((acc, act) => acc + (act.minutes || 0), 0);
 
   // Compute live ranked goals
-  const rankedGoals = scoreAndRankGoals(goals, planState?.checkInPreferences?.selectedGoalId || 'none');
+  const rankedGoals = scoreAndRankGoals(goals, 'none');
 
   // Helper to trigger toasts
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type });
   }, []);
 
-  // --- CHECK-IN & SCHEDULE GENERATION ---
+  // --- CHECK-IN & BLOCK-BY-BLOCK SCHEDULE SUBMISSION ---
   const handleOpenCheckIn = () => {
     setIsHomeTrigger(false);
     setIsCheckInOpen(true);
@@ -92,13 +92,18 @@ export default function App() {
   };
 
   const handleCheckInSubmit = (preferences) => {
-    const generated = generateOrbitSchedule({
-      ...preferences,
-      goals
+    const built = buildScheduleFromUserBlocks({
+      blocks: preferences.blocks || [],
+      startTime: preferences.startTime || '4:00 PM',
+      endTime: preferences.endTime || '9:30 PM',
+      bedtime: preferences.bedtime || '10:30 PM',
+      energy: preferences.energy || 'normal',
+      goals,
+      activity
     });
 
     const newPlanState = {
-      ...generated,
+      ...built,
       activeIndex: 0,
       dayState: 'planned',
       checkInPreferences: preferences
@@ -108,7 +113,7 @@ export default function App() {
     saveStoredPlan(newPlanState);
     setIsCheckInOpen(false);
     setCurrentPage('overview');
-    showToast('Orbit built your day successfully.', 'success');
+    showToast(`Schedule built with ${built.blockCount} blocks.`, 'success');
   };
 
   // Re-generate schedule with current preferences
@@ -117,19 +122,91 @@ export default function App() {
       handleOpenCheckIn();
       return;
     }
-    const generated = generateOrbitSchedule({
+    const built = buildScheduleFromUserBlocks({
       ...planState.checkInPreferences,
-      goals
+      goals,
+      activity
     });
     const updated = {
       ...planState,
-      ...generated,
+      ...built,
       activeIndex: 0,
       dayState: 'planned'
     };
     setPlanState(updated);
     saveStoredPlan(updated);
-    showToast('Orbit plan regenerated.', 'info');
+    showToast('Orbit plan refreshed.', 'info');
+  };
+
+  // --- INLINE BLOCK DURATION EDIT & DOWNSTREAM CASCADE ---
+  const handleUpdateBlockDuration = (blockIndex, newDuration) => {
+    if (!planState || !planState.blocks) return;
+
+    const startMin = parseTimeToMinutes(planState.scheduledStartTime || '4:00 PM');
+    const updatedBlocks = planState.blocks.map((b, idx) => {
+      if (idx === blockIndex) {
+        return {
+          ...b,
+          durationMinutes: newDuration,
+          remainingMinutes: newDuration
+        };
+      }
+      return b;
+    });
+
+    const built = buildScheduleFromUserBlocks({
+      blocks: updatedBlocks,
+      startTime: planState.scheduledStartTime || '4:00 PM',
+      endTime: planState.hardEndTime || '9:30 PM',
+      bedtime: planState.bedtime || '10:30 PM',
+      energy: planState.energy || 'normal',
+      goals,
+      activity
+    });
+
+    const updatedPlan = {
+      ...planState,
+      ...built,
+      checkInPreferences: {
+        ...(planState.checkInPreferences || {}),
+        blocks: built.blocks
+      }
+    };
+
+    setPlanState(updatedPlan);
+    saveStoredPlan(updatedPlan);
+    showToast(`Updated duration to ${newDuration}m. Timeline adjusted.`, 'info');
+  };
+
+  // --- DELETE BLOCK FROM OVERVIEW ---
+  const handleDeleteBlock = (blockIndex) => {
+    if (!planState || !planState.blocks) return;
+
+    const updatedBlocks = planState.blocks.filter((_, idx) => idx !== blockIndex);
+
+    const built = buildScheduleFromUserBlocks({
+      blocks: updatedBlocks,
+      startTime: planState.scheduledStartTime || '4:00 PM',
+      endTime: planState.hardEndTime || '9:30 PM',
+      bedtime: planState.bedtime || '10:30 PM',
+      energy: planState.energy || 'normal',
+      goals,
+      activity
+    });
+
+    const updatedPlan = {
+      ...planState,
+      ...built,
+      activeIndex: Math.min(planState.activeIndex || 0, Math.max(0, updatedBlocks.length - 1)),
+      checkInPreferences: {
+        ...(planState.checkInPreferences || {}),
+        blocks: built.blocks
+      }
+    };
+
+    setPlanState(updatedPlan);
+    saveStoredPlan(updatedPlan);
+    showToast('Block removed. Timeline updated.', 'info');
   };
 
   // --- DAY CONTROLS ---
@@ -185,7 +262,7 @@ export default function App() {
         minutes: duration,
         date: new Date().toISOString(),
         timestamp: Date.now(),
-        note: completedBlock.note || 'Focused junior year session'
+        note: completedBlock.note || 'Focused session'
       };
 
       setActivity((prev) => {
@@ -223,10 +300,22 @@ export default function App() {
 
     const nextIndex = currentIdx + 1;
 
+    // Recompute perGoalStats and counts
+    const built = buildScheduleFromUserBlocks({
+      blocks: updatedBlocks,
+      startTime: planState.scheduledStartTime || '4:00 PM',
+      endTime: planState.hardEndTime || '9:30 PM',
+      bedtime: planState.bedtime || '10:30 PM',
+      energy: planState.energy || 'normal',
+      goals,
+      activity
+    });
+
     // Check if entire day is complete
     if (nextIndex >= updatedBlocks.length) {
       const finishedPlan = {
         ...planState,
+        ...built,
         blocks: updatedBlocks,
         activeIndex: nextIndex,
         dayState: 'completed'
@@ -235,20 +324,18 @@ export default function App() {
       saveStoredPlan(finishedPlan);
       setCurrentPage('today');
 
-      // Trigger confetti celebration
       try {
         confetti({
           particleCount: 80,
           spread: 70,
           origin: { y: 0.6 }
         });
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
       showToast('All blocks complete! That’s enough for today.', 'success');
     } else {
       const advancedPlan = {
         ...planState,
+        ...built,
         blocks: updatedBlocks,
         activeIndex: nextIndex
       };
@@ -264,8 +351,6 @@ export default function App() {
 
     const currentIdx = planState.activeIndex || 0;
     const remainingBlocks = [...planState.blocks];
-    
-    // Remove the current block
     remainingBlocks.splice(currentIdx, 1);
 
     if (remainingBlocks.length === 0 || currentIdx >= remainingBlocks.length) {
@@ -279,7 +364,6 @@ export default function App() {
       setCurrentPage('today');
       showToast('Block removed. Schedule finished.', 'info');
     } else {
-      // Recalculate remaining timestamps starting from current time
       const currentMin = getCurrentTimeMinutes();
       const recalculated = recalculateScheduleTimes(remainingBlocks, currentMin);
       const updated = {
@@ -293,7 +377,7 @@ export default function App() {
     }
   };
 
-  // 3. Add Time (+15 / +30 mins) with intelligent free-time borrowing & ceiling protection
+  // 3. Add Time (+15 / +30 mins) with downstream cascade
   const handleAddTime = (addedMinutes) => {
     if (!planState || !planState.blocks) return;
 
@@ -325,7 +409,7 @@ export default function App() {
     showToast(result.message, 'success');
   };
 
-  // 4. Need a Break Flow (Creates separate Break block; preserves unfinished task & schedule)
+  // 4. Need a Break Flow
   const handleOpenBreakModal = (block) => {
     setBreakTargetBlock(block);
   };
@@ -340,7 +424,6 @@ export default function App() {
     const nowMin = getCurrentTimeMinutes();
     const cleanBreakDuration = roundToCleanIncrement(breakDuration || 15, 5);
 
-    // Create separate clean break block
     const breakBlock = {
       id: `break-${Date.now()}`,
       type: 'break',
@@ -354,7 +437,6 @@ export default function App() {
       remainingMinutes: cleanBreakDuration
     };
 
-    // Calculate remaining unfinished work on current task
     const remMinutes = currentTask.remainingMinutes || currentTask.durationMinutes || 30;
     const cleanRemMinutes = Math.max(10, roundToCleanIncrement(remMinutes, 5));
 
@@ -367,17 +449,15 @@ export default function App() {
       note: currentTask.note ? `${currentTask.note} (Resumed)` : 'Resumed focus session'
     };
 
-    // Replace current task with [Break Block, Unfinished Task Remainder]
     const newBlocks = [...planState.blocks];
     newBlocks.splice(currentIdx, 1, breakBlock, unfinishedTaskRemainder);
 
-    // Recalculate schedule starting from now
     const recalculated = recalculateScheduleTimes(newBlocks, nowMin);
 
     const updated = {
       ...planState,
       blocks: recalculated,
-      activeIndex: currentIdx, // Focuses on the break block immediately
+      activeIndex: currentIdx,
       scheduledEndTime: recalculated[recalculated.length - 1]?.endTime || planState.scheduledEndTime
     };
 
@@ -385,10 +465,9 @@ export default function App() {
     saveStoredPlan(updated);
 
     setBreakTargetBlock(null);
-    showToast(`Break started (${cleanBreakDuration}m). Your task will resume right after.`, 'info');
+    showToast(`Break started (${cleanBreakDuration}m). Task will resume after.`, 'info');
   };
 
-  // End Break Early: Return immediately to unfinished task without completing it
   const handleEndBreakEarly = () => {
     if (!planState || !planState.blocks) return;
     const currentIdx = planState.activeIndex || 0;
@@ -399,17 +478,14 @@ export default function App() {
     const nowMin = getCurrentTimeMinutes();
     const updatedBlocks = [...planState.blocks];
 
-    // Mark break block finished
     updatedBlocks[currentIdx] = {
       ...updatedBlocks[currentIdx],
       completed: true,
       remainingMinutes: 0
     };
 
-    // Advance to the unfinished task
     const nextIdx = currentIdx + 1;
     if (nextIdx < updatedBlocks.length) {
-      // Recalculate downstream schedule starting from now
       const recalculated = recalculateScheduleTimes(updatedBlocks, nowMin);
 
       const updated = {
@@ -427,7 +503,7 @@ export default function App() {
     }
   };
 
-  // 5. Push Later Flow (User selects destination, excludes Free Time, recalculates)
+  // 5. Push Later Flow
   const handleOpenPushLaterModal = (block) => {
     setPushLaterBlock(block);
   };
@@ -437,15 +513,11 @@ export default function App() {
 
     const currentIdx = planState.activeIndex || 0;
     const blocksList = [...planState.blocks];
-
-    // Remove the pushed block from its current index
     const [pushedBlock] = blocksList.splice(currentIdx, 1);
 
-    // Target position after chosen remaining task
     const targetIndex = currentIdx + 1 + chosenIndexOffset;
     blocksList.splice(Math.min(targetIndex, blocksList.length), 0, pushedBlock);
 
-    // Recalculate timestamps
     const recalculated = recalculateScheduleTimes(blocksList, blocksList[0]?.startMinutes || getCurrentTimeMinutes());
 
     const updated = {
@@ -458,7 +530,7 @@ export default function App() {
     saveStoredPlan(updated);
 
     setPushLaterBlock(null);
-    showToast(`Pushed "${pushedBlock.title}" later in your afternoon.`, 'info');
+    showToast(`Pushed "${pushedBlock.title}" later in your schedule.`, 'info');
   };
 
   // --- GOAL MANAGEMENT ---
@@ -480,7 +552,7 @@ export default function App() {
     const nextGoals = goals.filter((g) => g.id !== goalId);
     setGoals(nextGoals);
     saveStoredGoals(nextGoals);
-    showToast('Goal removed from scheduler.', 'info');
+    showToast('Goal removed from list.', 'info');
   };
 
   // --- PROGRESS ACTIONS ---
@@ -491,7 +563,6 @@ export default function App() {
       return nextActivity;
     });
 
-    // Rollback goal completed amount
     if (activityItem.goalId) {
       setGoals((prevGoals) => {
         const nextGoals = prevGoals.map((g) => {
@@ -521,7 +592,7 @@ export default function App() {
       saveStoredGoals(next);
       return next;
     });
-    showToast('Weekly progress reset to 0. Yearly records preserved.', 'success');
+    showToast('Weekly progress reset to 0. Records preserved.', 'success');
   };
 
   return (
@@ -575,7 +646,7 @@ export default function App() {
             </span>
             <span style={{ color: 'var(--accent-primary)', fontSize: '0.8rem' }}>•</span>
             <span style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
-              Orbit
+              Junior OS
             </span>
           </div>
 
@@ -605,6 +676,8 @@ export default function App() {
             onResumeDay={handleResumeDay}
             onRebuildDay={handleRebuildSchedule}
             onEditCheckIn={handleOpenCheckIn}
+            onUpdateBlockDuration={handleUpdateBlockDuration}
+            onDeleteBlock={handleDeleteBlock}
           />
         )}
 
@@ -635,6 +708,8 @@ export default function App() {
             goals={goals}
             activity={activity}
             totalTrackedMinutes={totalTrackedMinutes}
+            startedCount={planState?.startedCount || 0}
+            finishedCount={planState?.finishedCount || 0}
             onUndoActivity={handleUndoActivity}
             onResetWeeklyProgress={handleResetWeeklyProgress}
           />

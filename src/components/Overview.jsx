@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Sparkles,
   Clock,
@@ -11,24 +11,33 @@ import {
   BookOpen,
   ArrowRight,
   ShieldCheck,
-  Lock
+  Lock,
+  Plus,
+  Trash2,
+  Target,
+  ChevronRight
 } from 'lucide-react';
-import { formatDuration } from '../utils/timeHelpers';
+import { formatDuration } from '../utils/timeHelpers.js';
 
 export default function Overview({
   planState,
   onStartDay,
   onResumeDay,
   onRebuildDay,
-  onEditCheckIn
+  onEditCheckIn,
+  onUpdateBlockDuration,
+  onDeleteBlock,
+  onAddQuickBlock
 }) {
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+
   if (!planState || !planState.blocks || planState.blocks.length === 0) {
     return (
       <div style={{ padding: '60px 40px', textAlign: 'center', maxWidth: '600px', margin: '0 auto' }}>
         <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🪐</div>
         <h2 style={{ fontSize: '1.6rem', fontWeight: 800, marginBottom: '8px' }}>No active schedule yet.</h2>
-        <p style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
-          Tell Orbit about your afternoon and let the scheduling engine map out your day.
+        <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontStyle: 'italic' }}>
+          "Your life doesn't need a blueprint. You just need to decide what's next."
         </p>
         <button
           onClick={onEditCheckIn}
@@ -40,7 +49,7 @@ export default function Overview({
             fontWeight: 700
           }}
         >
-          Build My Day →
+          Build My Day (Block by Block) →
         </button>
       </div>
     );
@@ -49,22 +58,25 @@ export default function Overview({
   const {
     blocks = [],
     totalFocusedFormatted = '0m',
+    totalFreeFormatted = '0m',
     blockCount = 0,
-    scheduledStartTime = '1:00 PM',
+    scheduledStartTime = '4:00 PM',
     scheduledEndTime = '9:30 PM',
     hardEndTime = '9:30 PM',
     energy = 'normal',
-    contextSummary,
+    startedCount = 0,
+    finishedCount = 0,
+    perGoalStats = [],
     dayState = 'planned'
   } = planState;
 
   const isDayActive = dayState === 'active';
 
   return (
-    <div className="overview-view animate-fade-in" style={{ padding: '32px 40px 60px', maxWidth: '960px', margin: '0 auto' }}>
+    <div className="overview-view animate-fade-in" style={{ padding: '32px 40px 60px', maxWidth: '980px', margin: '0 auto' }}>
       
-      {/* Header */}
-      <div style={{ marginBottom: '32px' }}>
+      {/* Header & Central Philosophy */}
+      <div style={{ marginBottom: '28px' }}>
         <div
           style={{
             display: 'inline-flex',
@@ -83,45 +95,25 @@ export default function Overview({
           }}
         >
           <Sparkles size={12} />
-          <span>ORBIT PLAN</span>
+          <span>ORBIT DAILY PLAN</span>
         </div>
 
         <h1 style={{ fontSize: '2.2rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>
-          Here's your day.
+          Today's Schedule
         </h1>
 
-        <p style={{ fontSize: '0.96rem', color: 'var(--text-secondary)', marginTop: '4px', maxWidth: '600px' }}>
-          Orbit built this around your time, energy ({energy}), priorities, and need for recovery.
+        <p style={{ fontSize: '0.96rem', color: 'var(--accent-primary)', marginTop: '4px', fontStyle: 'italic' }}>
+          "Your life doesn't need a blueprint. You just need to decide what's next."
         </p>
-
-        {contextSummary && (
-          <div
-            style={{
-              marginTop: '12px',
-              padding: '10px 16px',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--accent-primary-faint)',
-              fontSize: '0.84rem',
-              color: 'var(--accent-primary)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <Sparkles size={15} />
-            <span>{contextSummary}</span>
-          </div>
-        )}
       </div>
 
-      {/* Metrics Bar: Focused Time, Blocks, End Time */}
+      {/* Metrics Bar: Focused Time, Blocks, Started vs Finished, End Time */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '16px',
-          marginBottom: '36px'
+          gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+          gap: '14px',
+          marginBottom: '32px'
         }}
       >
         {/* Metric 1: Focused Time */}
@@ -130,27 +122,47 @@ export default function Overview({
             backgroundColor: 'var(--bg-surface)',
             border: '1px solid var(--border-hairline)',
             borderRadius: 'var(--radius-lg)',
-            padding: '20px'
+            padding: '18px 20px'
           }}
         >
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-            Focused Time
+            Planned Focus
           </div>
           <div style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--accent-primary)', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
             {totalFocusedFormatted}
           </div>
-          <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-            Productive goal & study blocks
+          <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+            Productive goal & study time
           </div>
         </div>
 
-        {/* Metric 2: Total Blocks */}
+        {/* Metric 2: Started vs Finished */}
         <div
           style={{
             backgroundColor: 'var(--bg-surface)',
             border: '1px solid var(--border-hairline)',
             borderRadius: 'var(--radius-lg)',
-            padding: '20px'
+            padding: '18px 20px'
+          }}
+        >
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+            Started vs Finished
+          </div>
+          <div style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--accent-emerald)', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
+            {finishedCount} <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 600 }}>/ {blocks.length}</span>
+          </div>
+          <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+            Started: {startedCount} · Finished: {finishedCount}
+          </div>
+        </div>
+
+        {/* Metric 3: Total Blocks */}
+        <div
+          style={{
+            backgroundColor: 'var(--bg-surface)',
+            border: '1px solid var(--border-hairline)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '18px 20px'
           }}
         >
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
@@ -159,39 +171,39 @@ export default function Overview({
           <div style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
             {blocks.length}
           </div>
-          <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-            Work, breaks, gym & free time
+          <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+            {totalFreeFormatted !== '0m' ? `${totalFreeFormatted} free time` : 'Custom blocks'}
           </div>
         </div>
 
-        {/* Metric 3: Scheduled End Time */}
+        {/* Metric 4: Scheduled End Time */}
         <div
           style={{
             backgroundColor: 'var(--bg-surface)',
             border: '1px solid var(--border-hairline)',
             borderRadius: 'var(--radius-lg)',
-            padding: '20px'
+            padding: '18px 20px'
           }}
         >
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-            Protected End Time
+            Planned End Time
           </div>
-          <div style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--accent-emerald)', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
+          <div style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--accent-primary)', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
             {scheduledEndTime}
           </div>
-          <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-            Guaranteed cutoff before bedtime
+          <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+            Target bedtime: {planState.bedtime || '10:30 PM'}
           </div>
         </div>
       </div>
 
-      {/* Primary Action Button */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', marginBottom: '40px' }}>
+      {/* Primary Action Buttons */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '36px' }}>
         {isDayActive ? (
           <button
             onClick={onResumeDay}
             style={{
-              padding: '16px 32px',
+              padding: '15px 30px',
               borderRadius: 'var(--radius-lg)',
               backgroundColor: 'var(--accent-primary)',
               color: '#06070a',
@@ -210,7 +222,7 @@ export default function Overview({
           <button
             onClick={onStartDay}
             style={{
-              padding: '16px 32px',
+              padding: '15px 30px',
               borderRadius: 'var(--radius-lg)',
               backgroundColor: 'var(--accent-primary)',
               color: '#06070a',
@@ -230,7 +242,7 @@ export default function Overview({
         <button
           onClick={onEditCheckIn}
           style={{
-            padding: '16px 24px',
+            padding: '15px 22px',
             borderRadius: 'var(--radius-lg)',
             backgroundColor: 'var(--bg-surface)',
             color: 'var(--text-primary)',
@@ -243,42 +255,85 @@ export default function Overview({
           }}
         >
           <Edit3 size={16} />
-          <span>Adjust Check-In</span>
-        </button>
-
-        <button
-          onClick={onRebuildDay}
-          style={{
-            padding: '16px 20px',
-            borderRadius: 'var(--radius-lg)',
-            backgroundColor: 'transparent',
-            color: 'var(--text-muted)',
-            fontSize: '0.9rem',
-            fontWeight: 500,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
-        >
-          <RotateCcw size={15} />
-          <span>Regenerate Orbit Plan</span>
+          <span>Edit Schedule (Block by Block)</span>
         </button>
       </div>
 
-      {/* Timeline Section */}
+      {/* GOALS AND TIME TRACKING: Planned vs Completed Today */}
+      {Array.isArray(perGoalStats) && perGoalStats.some((g) => g.plannedMinutes > 0) && (
+        <div style={{ marginBottom: '36px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+            <Target size={18} style={{ color: 'var(--accent-primary)' }} />
+            <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+              Goals & Time Tracking
+            </h3>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: '12px'
+            }}
+          >
+            {perGoalStats
+              .filter((g) => g.plannedMinutes > 0)
+              .map((g) => (
+                <div
+                  key={g.goalId}
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    border: '1px solid var(--border-hairline)',
+                    borderRadius: 'var(--radius-lg)',
+                    padding: '16px'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                    <span style={{ fontSize: '1.25rem' }}>{g.icon}</span>
+                    <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {g.name}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '4px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Planned Today:</span>
+                    <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{g.plannedFormatted}</strong>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '4px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Completed:</span>
+                    <strong style={{ color: 'var(--accent-emerald)', fontFamily: 'var(--font-mono)' }}>{g.completedFormatted}</strong>
+                  </div>
+
+                  {g.remainingPlannedMinutes > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Remaining:</span>
+                      <span style={{ color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>{g.remainingPlannedFormatted}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* Timeline Section with Inline Cascading Edits */}
       <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-            Afternoon Timeline
-          </h3>
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+              Timeline
+            </h3>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              Adjusting any block automatically shifts subsequent blocks.
+            </div>
+          </div>
+          <div style={{ fontSize: '0.82rem', color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
             {scheduledStartTime} — {scheduledEndTime}
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {blocks.map((block, idx) => {
             const isBreak = block.type === 'break';
             const isFreeTime = block.type === 'freetime';
@@ -308,8 +363,8 @@ export default function Overview({
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '18px',
-                  padding: '16px 20px',
+                  gap: '16px',
+                  padding: '14px 18px',
                   borderRadius: 'var(--radius-lg)',
                   backgroundColor: isBusyBlock
                     ? 'rgba(16, 19, 29, 0.6)'
@@ -322,7 +377,7 @@ export default function Overview({
                     ? '1px dashed var(--border-subtle)'
                     : '1px solid var(--border-hairline)',
                   position: 'relative',
-                  transition: 'transform 0.18s ease'
+                  transition: 'all 0.18s ease'
                 }}
               >
                 {/* Time Range */}
@@ -344,14 +399,14 @@ export default function Overview({
                 {/* Icon */}
                 <div
                   style={{
-                    width: '42px',
-                    height: '42px',
+                    width: '40px',
+                    height: '40px',
                     borderRadius: 'var(--radius-md)',
                     backgroundColor: 'var(--bg-card)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '1.25rem',
+                    fontSize: '1.2rem',
                     flexShrink: 0,
                     border: '1px solid var(--border-hairline)'
                   }}
@@ -362,7 +417,7 @@ export default function Overview({
                 {/* Title & Context */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '1rem', fontWeight: 700, color: isBusyBlock ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
+                    <span style={{ fontSize: '0.95rem', fontWeight: 700, color: isBusyBlock ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
                       {block.title}
                     </span>
                     <span
@@ -378,28 +433,10 @@ export default function Overview({
                     >
                       {formatDuration(block.durationMinutes)}
                     </span>
-                    {isBusyBlock && (
-                      <span
-                        style={{
-                          fontSize: '0.68rem',
-                          fontWeight: 700,
-                          color: 'var(--text-muted)',
-                          backgroundColor: 'var(--bg-card)',
-                          padding: '2px 8px',
-                          borderRadius: 'var(--radius-pill)',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '3px'
-                        }}
-                      >
-                        <Lock size={10} />
-                        <span>UNAVAILABLE</span>
-                      </span>
-                    )}
                     {block.tracked && !isBusyBlock && (
                       <span
                         style={{
-                          fontSize: '0.68rem',
+                          fontSize: '0.66rem',
                           color: 'var(--text-muted)',
                           padding: '2px 6px',
                           borderRadius: 'var(--radius-sm)',
@@ -412,29 +449,87 @@ export default function Overview({
                   </div>
 
                   {block.note && (
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
                       {block.note}
                     </div>
                   )}
                 </div>
 
-                {/* Completion Status */}
-                {block.completed && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      color: 'var(--accent-emerald)',
-                      fontSize: '0.78rem',
-                      fontWeight: 600,
-                      fontFamily: 'var(--font-mono)'
-                    }}
-                  >
-                    <CheckCircle2 size={16} />
-                    <span>Done</span>
-                  </div>
-                )}
+                {/* Inline Duration Edit (+/- 15m) & Delete */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                  {onUpdateBlockDuration && !isBusyBlock && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateBlockDuration(idx, Math.max(10, (block.durationMinutes || 30) - 15))}
+                        disabled={block.durationMinutes <= 15}
+                        style={{
+                          padding: '3px 7px',
+                          borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'var(--bg-card)',
+                          color: 'var(--text-secondary)',
+                          border: '1px solid var(--border-hairline)',
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          opacity: block.durationMinutes <= 15 ? 0.4 : 1
+                        }}
+                      >
+                        -15m
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateBlockDuration(idx, (block.durationMinutes || 30) + 15)}
+                        style={{
+                          padding: '3px 7px',
+                          borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'var(--bg-card)',
+                          color: 'var(--text-secondary)',
+                          border: '1px solid var(--border-hairline)',
+                          fontSize: '0.72rem',
+                          fontWeight: 700
+                        }}
+                      >
+                        +15m
+                      </button>
+                    </>
+                  )}
+
+                  {onDeleteBlock && (
+                    <button
+                      type="button"
+                      onClick={() => onDeleteBlock(idx)}
+                      style={{
+                        padding: '6px',
+                        borderRadius: 'var(--radius-sm)',
+                        color: 'var(--text-muted)',
+                        marginLeft: '4px'
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent-coral)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+
+                  {/* Completion Status */}
+                  {block.completed && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        color: 'var(--accent-emerald)',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        fontFamily: 'var(--font-mono)',
+                        marginLeft: '8px'
+                      }}
+                    >
+                      <CheckCircle2 size={16} />
+                      <span>Done</span>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}

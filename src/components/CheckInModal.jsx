@@ -4,18 +4,36 @@ import {
   Sparkles,
   Clock,
   Zap,
-  BookOpen,
-  Dumbbell,
-  Coffee,
-  Calendar,
-  Lock,
   Plus,
   Trash2,
   Check,
   Target,
-  Bath
+  ArrowRight,
+  BookOpen,
+  Dumbbell,
+  Coffee,
+  Heart,
+  User,
+  Gamepad2,
+  Edit2
 } from 'lucide-react';
-import { getCurrentTimeString } from '../utils/timeHelpers';
+import {
+  getCurrentTimeString,
+  getCurrentTimeMinutes,
+  minutesToTimeString,
+  parseTimeToMinutes,
+  formatDuration,
+  roundToCleanIncrement
+} from '../utils/timeHelpers.js';
+import { recalculateScheduleTimes } from '../utils/scheduler.js';
+
+export const BUILT_IN_ACTIVITIES = [
+  { id: 'ap_schoolwork', name: 'AP Schoolwork', icon: '📚', type: 'schoolwork', defaultDuration: 60, color: '#38bdf8' },
+  { id: 'mental_health', name: 'Mental Health Club', icon: '🧠', type: 'club', defaultDuration: 45, color: '#a78bfa' },
+  { id: 'personal', name: 'Personal', icon: '🌟', type: 'personal', defaultDuration: 30, color: '#f472b6' },
+  { id: 'freetime', name: 'Free Time', icon: '🎮', type: 'freetime', defaultDuration: 60, color: '#60a5fa' },
+  { id: 'break', name: 'Break / Recharge', icon: '☕', type: 'break', defaultDuration: 15, color: '#34d399' }
+];
 
 export default function CheckInModal({
   isOpen,
@@ -25,119 +43,155 @@ export default function CheckInModal({
   initialValues = null,
   isHomeTrigger = false
 }) {
-  const [startTime, setStartTime] = useState('1:00 PM');
+  const [startTime, setStartTime] = useState('4:00 PM');
   const [endTime, setEndTime] = useState('9:30 PM');
   const [bedtime, setBedtime] = useState('10:30 PM');
   const [energy, setEnergy] = useState('normal'); // 'low' | 'normal' | 'high'
-  const [schoolworkMinutes, setSchoolworkMinutes] = useState(60);
-  
-  // Specific Goal Selection (Replaces AI input)
-  const [selectedGoalId, setSelectedGoalId] = useState('none'); // 'none' or goal id
 
-  // "Are you busy today?" Time Range Feature
-  const [isBusy, setIsBusy] = useState(false);
-  const [busyRanges, setBusyRanges] = useState([
-    { id: 'busy-1', startTime: '5:00 PM', endTime: '8:00 PM', label: 'Busy' }
-  ]);
+  // User's customized list of blocks built block-by-block
+  const [blocks, setBlocks] = useState([]);
 
-  // Gym Scheduling Preferences
-  const [gymToday, setGymToday] = useState(true);
-  const [gymStartTime, setGymStartTime] = useState('flexible'); // 'flexible' | '5:00 PM' | '6:00 PM' | '7:00 PM' | custom string
-  const [gymDuration, setGymDuration] = useState(60); // 45, 60, 75, 90
-  const [gymBufferMinutes, setGymBufferMinutes] = useState(15); // 0, 15, 20
-
-  const [freeTimeMinutes, setFreeTimeMinutes] = useState(60);
+  // Active step selection state
+  const [selectedActivity, setSelectedActivity] = useState(null);
+  const [selectedDuration, setSelectedDuration] = useState(45);
+  const [customDurationInput, setCustomDurationInput] = useState('');
+  const [customTitleInput, setCustomTitleInput] = useState('');
+  const [customNoteInput, setCustomNoteInput] = useState('');
 
   useEffect(() => {
     if (isOpen) {
       if (initialValues) {
-        setStartTime(initialValues.startTime || (isHomeTrigger ? getCurrentTimeString() : '1:00 PM'));
+        setStartTime(initialValues.startTime || (isHomeTrigger ? getCurrentTimeString() : '4:00 PM'));
         setEndTime(initialValues.endTime || '9:30 PM');
         setBedtime(initialValues.bedtime || '10:30 PM');
         setEnergy(initialValues.energy || 'normal');
-        setSchoolworkMinutes(initialValues.schoolworkMinutes ?? 60);
-        setSelectedGoalId(initialValues.selectedGoalId || 'none');
-        setIsBusy(initialValues.isBusy ?? false);
-        setBusyRanges(
-          Array.isArray(initialValues.busyRanges) && initialValues.busyRanges.length > 0
-            ? initialValues.busyRanges
-            : [{ id: 'busy-1', startTime: '5:00 PM', endTime: '8:00 PM', label: 'Busy' }]
-        );
-        setGymToday(initialValues.gymToday ?? true);
-        setGymStartTime(initialValues.gymStartTime || 'flexible');
-        setGymDuration(initialValues.gymDuration ?? 60);
-        setGymBufferMinutes(initialValues.gymBufferMinutes ?? 15);
-        setFreeTimeMinutes(initialValues.freeTimeMinutes ?? 60);
+        if (Array.isArray(initialValues.blocks) && initialValues.blocks.length > 0) {
+          setBlocks(initialValues.blocks);
+        } else {
+          setBlocks([]);
+        }
       } else if (isHomeTrigger) {
         setStartTime(getCurrentTimeString());
+        setBlocks([]);
+      } else {
+        setBlocks([]);
       }
+      setSelectedActivity(null);
+      setSelectedDuration(45);
+      setCustomDurationInput('');
+      setCustomTitleInput('');
+      setCustomNoteInput('');
     }
   }, [isOpen, initialValues, isHomeTrigger]);
 
   if (!isOpen) return null;
 
-  const handleAddBusyRange = () => {
-    const nextId = `busy-${Date.now()}`;
-    setBusyRanges((prev) => [
-      ...prev,
-      { id: nextId, startTime: '5:00 PM', endTime: '7:00 PM', label: 'Busy' }
-    ]);
+  const startMin = parseTimeToMinutes(startTime);
+  const endMin = parseTimeToMinutes(endTime);
+  const availableTotalMinutes = Math.max(0, (endMin >= startMin ? endMin - startMin : endMin + 1440 - startMin));
+
+  // Current calculated blocks with clean cascading timestamps
+  const calculatedBlocks = recalculateScheduleTimes(blocks, startMin);
+
+  // Determine next block start time
+  const nextStartMin = calculatedBlocks.length > 0
+    ? calculatedBlocks[calculatedBlocks.length - 1].endMinutes
+    : startMin;
+  const nextStartTimeStr = minutesToTimeString(nextStartMin);
+
+  // Total minutes scheduled so far
+  const totalScheduledMinutes = calculatedBlocks.reduce((acc, b) => acc + (b.durationMinutes || 0), 0);
+  const remainingAvailableMinutes = Math.max(0, availableTotalMinutes - totalScheduledMinutes);
+
+  // Handle selecting an activity
+  const handleSelectActivity = (activity) => {
+    setSelectedActivity(activity);
+    if (activity.defaultDuration) {
+      setSelectedDuration(activity.defaultDuration);
+    } else if (activity.sessionMinutes) {
+      setSelectedDuration(activity.sessionMinutes);
+    } else {
+      setSelectedDuration(45);
+    }
+    setCustomTitleInput(activity.id === 'custom' ? '' : activity.name);
+    setCustomNoteInput('');
   };
 
-  const handleRemoveBusyRange = (id) => {
-    setBusyRanges((prev) => prev.filter((r) => r.id !== id));
+  // Handle confirming and adding the block
+  const handleAddCurrentBlock = (e) => {
+    if (e) e.preventDefault();
+    if (!selectedActivity) return;
+
+    const finalDuration = customDurationInput && !isNaN(parseInt(customDurationInput, 10))
+      ? roundToCleanIncrement(parseInt(customDurationInput, 10), 5)
+      : selectedDuration;
+
+    const title = selectedActivity.id === 'custom'
+      ? (customTitleInput.trim() || 'Custom Task')
+      : selectedActivity.name;
+
+    const isGoal = goals.some((g) => g.id === selectedActivity.id);
+    const goalId = isGoal ? selectedActivity.id : null;
+
+    const newBlock = {
+      id: `block-${Date.now()}-${blocks.length}`,
+      type: selectedActivity.type || (isGoal ? 'goal' : 'custom'),
+      goalId: goalId,
+      title: title,
+      icon: selectedActivity.icon || '🎯',
+      durationMinutes: Math.max(5, finalDuration),
+      tracked: selectedActivity.type !== 'freetime' && selectedActivity.type !== 'break',
+      note: customNoteInput.trim() || (isGoal ? 'Focused goal session' : selectedActivity.name),
+      completed: false
+    };
+
+    const updated = [...blocks, newBlock];
+    setBlocks(updated);
+
+    // Reset selection to prompt for next block
+    setSelectedActivity(null);
+    setCustomDurationInput('');
+    setCustomTitleInput('');
+    setCustomNoteInput('');
   };
 
-  const handleUpdateBusyRange = (id, field, value) => {
-    setBusyRanges((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
-    );
+  // Handle adjusting a block's duration inline (cascades immediately)
+  const handleAdjustDuration = (index, deltaMinutes) => {
+    const updated = blocks.map((b, idx) => {
+      if (idx === index) {
+        const newDur = Math.max(10, (b.durationMinutes || 30) + deltaMinutes);
+        return { ...b, durationMinutes: newDur, remainingMinutes: newDur };
+      }
+      return b;
+    });
+    setBlocks(updated);
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  // Handle removing a block
+  const handleRemoveBlock = (index) => {
+    setBlocks(blocks.filter((_, idx) => idx !== index));
+  };
+
+  // Handle finishing planning
+  const handleFinishPlanning = () => {
     onSubmit({
       startTime,
       endTime,
       bedtime,
       energy,
-      schoolworkMinutes,
-      selectedGoalId,
-      isBusy,
-      busyRanges: isBusy ? busyRanges : [],
-      gymToday,
-      gymStartTime,
-      gymDuration: Number(gymDuration),
-      gymBufferMinutes: Number(gymBufferMinutes),
-      freeTimeMinutes
+      blocks: calculatedBlocks
     });
   };
 
-  const schoolworkOptions = [
-    { label: 'None (0m)', value: 0 },
-    { label: '30m', value: 30 },
-    { label: '1 hour', value: 60 },
-    { label: '2 hours', value: 120 },
-    { label: '3h+', value: 180 }
-  ];
-
-  const gymDurationOptions = [
-    { label: '45 min', value: 45 },
-    { label: '1 hour', value: 60 },
-    { label: '1h 15m', value: 75 },
-    { label: '1h 30m', value: 90 }
-  ];
-
-  const freeTimeOptions = [
-    { label: '30 min', value: 30 },
-    { label: '1 hour', value: 60 },
-    { label: '1.5 hours', value: 90 },
-    { label: '2 hours', value: 120 }
-  ];
-
-  const startTimePresets = ['Now', '1:00 PM', '3:00 PM', '4:00 PM', '4:30 PM', '5:00 PM'];
+  const startTimePresets = ['Now', '3:30 PM', '4:00 PM', '4:30 PM', '5:00 PM'];
   const endTimePresets = ['8:30 PM', '9:00 PM', '9:30 PM', '10:00 PM', '10:30 PM'];
-  const gymTimePresets = ['Flexible', '5:00 PM', '6:00 PM', '7:00 PM', '7:30 PM', '8:00 PM'];
+  const durationPresets = [
+    { label: '15m', value: 15 },
+    { label: '30m', value: 30 },
+    { label: '45m', value: 45 },
+    { label: '1 hour', value: 60 },
+    { label: '1.5 hours', value: 90 }
+  ];
 
   return (
     <div
@@ -163,11 +217,11 @@ export default function CheckInModal({
           border: '1px solid var(--border-subtle)',
           borderRadius: 'var(--radius-xl)',
           width: '100%',
-          maxWidth: '680px',
-          maxHeight: '92vh',
+          maxWidth: '780px',
+          maxHeight: '94vh',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: 'var(--shadow-lg), 0 0 35px rgba(56, 189, 248, 0.15)',
+          boxShadow: 'var(--shadow-lg), 0 0 40px rgba(56, 189, 248, 0.15)',
           position: 'relative',
           overflow: 'hidden'
         }}
@@ -202,7 +256,7 @@ export default function CheckInModal({
               }}
             >
               <Sparkles size={12} />
-              <span>ORBIT CHECK-IN</span>
+              <span>BUILD MY DAY · BLOCK BY BLOCK</span>
             </div>
             <h2
               style={{
@@ -212,7 +266,7 @@ export default function CheckInModal({
                 letterSpacing: '-0.025em'
               }}
             >
-              Tell Orbit about your afternoon.
+              Build your day, one decision at a time.
             </h2>
             <p
               style={{
@@ -221,7 +275,7 @@ export default function CheckInModal({
                 marginTop: '3px'
               }}
             >
-              Orbit will build your schedule around your priorities, gym, and busy hours.
+              "Your life doesn't need a blueprint. You just need to decide what's next."
             </p>
           </div>
 
@@ -243,918 +297,624 @@ export default function CheckInModal({
           </button>
         </div>
 
-        {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} style={{ overflowY: 'auto', padding: '24px 28px 32px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '26px' }}>
+        {/* Scrollable Body */}
+        <div style={{ overflowY: 'auto', padding: '24px 28px 32px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
-            {/* 1. DAILY GOAL PREFERENCE QUESTION */}
+            {/* 1. SETUP BAR: Start, End, Bedtime & Energy */}
             <div
               style={{
                 backgroundColor: 'var(--bg-surface)',
                 border: '1px solid var(--border-hairline)',
                 borderRadius: 'var(--radius-lg)',
-                padding: '20px'
-              }}
-            >
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  fontSize: '0.92rem',
-                  fontWeight: 700,
-                  color: 'var(--text-primary)',
-                  marginBottom: '6px'
-                }}
-              >
-                <Target size={17} style={{ color: 'var(--accent-primary)' }} />
-                <span>Do you want to work on anything specific today?</span>
-              </label>
-              <p
-                style={{
-                  fontSize: '0.78rem',
-                  color: 'var(--text-muted)',
-                  marginBottom: '14px'
-                }}
-              >
-                Pick a goal to prioritize today, or let Orbit balance your weekly commitments.
-              </p>
-
-              {/* Selectable Goal Cards / Pills Grid */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-                  gap: '10px'
-                }}
-              >
-                {/* Option: No specification — let Orbit decide */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedGoalId('none')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    padding: '12px 14px',
-                    borderRadius: 'var(--radius-md)',
-                    backgroundColor: selectedGoalId === 'none' ? 'var(--bg-card)' : 'var(--bg-primary)',
-                    border: selectedGoalId === 'none'
-                      ? '1.5px solid var(--accent-primary)'
-                      : '1px solid var(--border-hairline)',
-                    color: selectedGoalId === 'none' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                    textAlign: 'left',
-                    boxShadow: selectedGoalId === 'none' ? '0 0 20px rgba(56, 189, 248, 0.18)' : 'none',
-                    transition: 'all 0.2s ease',
-                    gridColumn: '1 / -1'
-                  }}
-                >
-                  <Sparkles size={16} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '0.88rem', fontWeight: 700 }}>
-                      No specification — let Orbit decide
-                    </div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                      Automatically balances weekly progress & energy
-                    </div>
-                  </div>
-                  {selectedGoalId === 'none' && <Check size={16} />}
-                </button>
-
-                {/* Options for each user goal */}
-                {goals.map((g) => {
-                  const isSelected = selectedGoalId === g.id;
-                  return (
-                    <button
-                      key={g.id}
-                      type="button"
-                      onClick={() => setSelectedGoalId(g.id)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '10px',
-                        padding: '12px 14px',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: isSelected ? 'var(--bg-card)' : 'var(--bg-primary)',
-                        border: isSelected
-                          ? '1.5px solid var(--accent-primary)'
-                          : '1px solid var(--border-hairline)',
-                        color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
-                        textAlign: 'left',
-                        boxShadow: isSelected ? '0 0 20px rgba(56, 189, 248, 0.18)' : 'none',
-                        transition: 'all 0.2s ease'
-                      }}
-                    >
-                      <span style={{ fontSize: '1.25rem', flexShrink: 0 }}>{g.icon}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: '0.86rem',
-                            fontWeight: 600,
-                            color: isSelected ? 'var(--accent-primary)' : 'var(--text-primary)',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                          }}
-                        >
-                          {g.name}
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                          {g.weeklyTarget} {g.unit}/wk
-                        </div>
-                      </div>
-                      {isSelected && <Check size={15} style={{ color: 'var(--accent-primary)' }} />}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 2. "ARE YOU BUSY TODAY?" TIME RANGE QUESTION */}
-            <div
-              style={{
-                backgroundColor: 'var(--bg-surface)',
-                border: '1px solid var(--border-hairline)',
-                borderRadius: 'var(--radius-lg)',
-                padding: '20px'
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '12px',
-                  marginBottom: '6px'
-                }}
-              >
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    fontSize: '0.92rem',
-                    fontWeight: 700,
-                    color: 'var(--text-primary)'
-                  }}
-                >
-                  <Lock size={17} style={{ color: 'var(--accent-sapphire)' }} />
-                  <span>Are you busy today?</span>
-                </label>
-
-                {/* Yes / No Toggle */}
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  {[
-                    { label: 'No, free afternoon', val: false },
-                    { label: 'Yes, I have plans', val: true }
-                  ].map((btn) => {
-                    const active = isBusy === btn.val;
-                    return (
-                      <button
-                        key={btn.label}
-                        type="button"
-                        onClick={() => setIsBusy(btn.val)}
-                        style={{
-                          padding: '6px 14px',
-                          borderRadius: 'var(--radius-pill)',
-                          backgroundColor: active ? 'var(--accent-primary)' : 'var(--bg-card)',
-                          color: active ? '#06070a' : 'var(--text-secondary)',
-                          fontWeight: 700,
-                          fontSize: '0.78rem',
-                          border: active ? 'none' : '1px solid var(--border-hairline)',
-                          transition: 'all 0.18s ease'
-                        }}
-                      >
-                        {btn.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <p
-                style={{
-                  fontSize: '0.78rem',
-                  color: 'var(--text-muted)',
-                  marginBottom: isBusy ? '16px' : '0'
-                }}
-              >
-                Block out unavailable time (e.g. 6:00 PM–7:00 PM for sports, appointments, or events). Orbit schedules around them and continues afterward.
-              </p>
-
-              {/* Busy Time Range Inputs */}
-              {isBusy && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
-                  {busyRanges.map((range, idx) => (
-                    <div
-                      key={range.id || idx}
-                      style={{
-                        backgroundColor: 'var(--bg-card)',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: 'var(--radius-md)',
-                        padding: '14px 16px',
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr)) auto',
-                        gap: '12px',
-                        alignItems: 'center'
-                      }}
-                    >
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                          Start Time
-                        </label>
-                        <input
-                          type="text"
-                          value={range.startTime}
-                          onChange={(e) => handleUpdateBusyRange(range.id, 'startTime', e.target.value)}
-                          placeholder="6:00 PM"
-                          style={{
-                            width: '100%',
-                            padding: '8px 10px',
-                            borderRadius: 'var(--radius-sm)',
-                            backgroundColor: 'var(--bg-primary)',
-                            border: '1px solid var(--border-hairline)',
-                            color: 'var(--text-primary)',
-                            fontFamily: 'var(--font-mono)',
-                            fontSize: '0.88rem',
-                            fontWeight: 600
-                          }}
-                        />
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                          End Time
-                        </label>
-                        <input
-                          type="text"
-                          value={range.endTime}
-                          onChange={(e) => handleUpdateBusyRange(range.id, 'endTime', e.target.value)}
-                          placeholder="7:00 PM"
-                          style={{
-                            width: '100%',
-                            padding: '8px 10px',
-                            borderRadius: 'var(--radius-sm)',
-                            backgroundColor: 'var(--bg-primary)',
-                            border: '1px solid var(--border-hairline)',
-                            color: 'var(--text-primary)',
-                            fontFamily: 'var(--font-mono)',
-                            fontSize: '0.88rem',
-                            fontWeight: 600
-                          }}
-                        />
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                          Label
-                        </label>
-                        <input
-                          type="text"
-                          value={range.label}
-                          onChange={(e) => handleUpdateBusyRange(range.id, 'label', e.target.value)}
-                          placeholder="Busy"
-                          style={{
-                            width: '100%',
-                            padding: '8px 10px',
-                            borderRadius: 'var(--radius-sm)',
-                            backgroundColor: 'var(--bg-primary)',
-                            border: '1px solid var(--border-hairline)',
-                            color: 'var(--text-primary)',
-                            fontSize: '0.88rem'
-                          }}
-                        />
-                      </div>
-
-                      {busyRanges.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveBusyRange(range.id)}
-                          style={{
-                            padding: '8px',
-                            color: 'var(--text-muted)',
-                            borderRadius: 'var(--radius-sm)',
-                            alignSelf: 'flex-end',
-                            marginBottom: '2px'
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent-coral)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-
-                  <button
-                    type="button"
-                    onClick={handleAddBusyRange}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      fontSize: '0.78rem',
-                      fontWeight: 600,
-                      color: 'var(--accent-primary)',
-                      padding: '6px 0',
-                      alignSelf: 'flex-start'
-                    }}
-                  >
-                    <Plus size={14} />
-                    <span>+ Add another busy time range</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* 3. TIME CONSTRAINTS: START & END TIME */}
-            <div
-              style={{
+                padding: '18px 20px',
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                gap: '16px'
+                gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                gap: '16px',
+                alignItems: 'center'
               }}
             >
               {/* Start Time */}
-              <div
-                style={{
-                  backgroundColor: 'var(--bg-surface)',
-                  padding: '16px',
-                  borderRadius: 'var(--radius-lg)',
-                  border: '1px solid var(--border-hairline)'
-                }}
-              >
-                <label
-                  style={{
-                    display: 'block',
-                    fontSize: '0.82rem',
-                    fontWeight: 600,
-                    color: 'var(--text-secondary)',
-                    marginBottom: '8px'
-                  }}
-                >
-                  When do you want to start?
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '4px', fontWeight: 600 }}>
+                  Start Time
                 </label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                  <Clock size={16} style={{ color: 'var(--accent-primary)' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Clock size={14} style={{ color: 'var(--accent-primary)' }} />
                   <input
                     type="text"
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
-                    placeholder="e.g. 4:30 PM"
+                    placeholder="4:00 PM"
                     style={{
                       width: '100%',
-                      padding: '8px 12px',
+                      padding: '6px 10px',
                       borderRadius: 'var(--radius-sm)',
                       backgroundColor: 'var(--bg-card)',
-                      border: '1px solid var(--border-subtle)',
+                      border: '1px solid var(--border-hairline)',
                       color: 'var(--text-primary)',
                       fontFamily: 'var(--font-mono)',
-                      fontSize: '0.95rem',
-                      fontWeight: 600
+                      fontSize: '0.88rem',
+                      fontWeight: 700
                     }}
                   />
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                  {startTimePresets.map((preset) => (
+                <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
+                  {startTimePresets.slice(0, 3).map((p) => (
                     <button
-                      key={preset}
+                      key={p}
                       type="button"
-                      onClick={() => setStartTime(preset === 'Now' ? getCurrentTimeString() : preset)}
+                      onClick={() => setStartTime(p === 'Now' ? getCurrentTimeString() : p)}
                       style={{
-                        padding: '3px 8px',
+                        padding: '2px 6px',
                         borderRadius: 'var(--radius-sm)',
-                        fontSize: '0.72rem',
-                        fontWeight: 500,
+                        fontSize: '0.68rem',
                         backgroundColor: 'var(--bg-card)',
                         color: 'var(--text-secondary)',
                         border: '1px solid var(--border-hairline)'
                       }}
                     >
-                      {preset}
+                      {p}
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* End Time */}
-              <div
-                style={{
-                  backgroundColor: 'var(--bg-surface)',
-                  padding: '16px',
-                  borderRadius: 'var(--radius-lg)',
-                  border: '1px solid var(--border-hairline)'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <label
-                    style={{
-                      fontSize: '0.82rem',
-                      fontWeight: 600,
-                      color: 'var(--text-secondary)'
-                    }}
-                  >
-                    When do you want to be done?
-                  </label>
-                  <span
-                    style={{
-                      fontSize: '0.68rem',
-                      color: 'var(--accent-primary)',
-                      fontWeight: 600,
-                      textTransform: 'uppercase',
-                      fontFamily: 'var(--font-mono)'
-                    }}
-                  >
-                    Protected
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                  <Clock size={16} style={{ color: 'var(--accent-primary)' }} />
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '4px', fontWeight: 600 }}>
+                  End Time
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Clock size={14} style={{ color: 'var(--accent-emerald)' }} />
                   <input
                     type="text"
                     value={endTime}
                     onChange={(e) => setEndTime(e.target.value)}
-                    placeholder="e.g. 9:30 PM"
+                    placeholder="9:30 PM"
                     style={{
                       width: '100%',
-                      padding: '8px 12px',
+                      padding: '6px 10px',
                       borderRadius: 'var(--radius-sm)',
                       backgroundColor: 'var(--bg-card)',
-                      border: '1px solid var(--border-subtle)',
+                      border: '1px solid var(--border-hairline)',
                       color: 'var(--text-primary)',
                       fontFamily: 'var(--font-mono)',
-                      fontSize: '0.95rem',
-                      fontWeight: 600
+                      fontSize: '0.88rem',
+                      fontWeight: 700
                     }}
                   />
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                  {endTimePresets.map((preset) => (
+                <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
+                  {endTimePresets.slice(1, 4).map((p) => (
                     <button
-                      key={preset}
+                      key={p}
                       type="button"
-                      onClick={() => setEndTime(preset)}
+                      onClick={() => setEndTime(p)}
                       style={{
-                        padding: '3px 8px',
+                        padding: '2px 6px',
                         borderRadius: 'var(--radius-sm)',
-                        fontSize: '0.72rem',
-                        fontWeight: 500,
+                        fontSize: '0.68rem',
                         backgroundColor: 'var(--bg-card)',
                         color: 'var(--text-secondary)',
                         border: '1px solid var(--border-hairline)'
                       }}
                     >
-                      {preset}
+                      {p}
                     </button>
                   ))}
                 </div>
               </div>
-            </div>
 
-            {/* 4. ENERGY LEVEL */}
-            <div>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  fontSize: '0.85rem',
-                  fontWeight: 600,
-                  color: 'var(--text-primary)',
-                  marginBottom: '10px'
-                }}
-              >
-                <Zap size={15} style={{ color: 'var(--accent-primary)' }} />
-                <span>How's your energy?</span>
-              </label>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(3, 1fr)',
-                  gap: '10px'
-                }}
-              >
-                {[
-                  { id: 'low', label: 'Low', desc: 'Take it easy' },
-                  { id: 'normal', label: 'Normal', desc: 'Balanced' },
-                  { id: 'high', label: 'High', desc: 'Push a little more' }
-                ].map((item) => {
-                  const isSelected = energy === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setEnergy(item.id)}
-                      style={{
-                        padding: '14px 10px',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: isSelected ? 'var(--bg-card)' : 'var(--bg-surface)',
-                        border: isSelected ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-hairline)',
-                        textAlign: 'center',
-                        boxShadow: isSelected ? 'var(--shadow-glow)' : 'none',
-                        transition: 'all 0.18s ease'
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: '0.92rem',
-                          fontWeight: 700,
-                          color: isSelected ? 'var(--accent-primary)' : 'var(--text-primary)',
-                          marginBottom: '2px'
-                        }}
-                      >
-                        {item.label}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: '0.72rem',
-                          color: isSelected ? 'var(--text-secondary)' : 'var(--text-muted)'
-                        }}
-                      >
-                        {item.desc}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 5. SCHOOL WORKLOAD */}
-            <div>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: '10px'
-                }}
-              >
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    fontSize: '0.85rem',
-                    fontWeight: 600,
-                    color: 'var(--text-primary)'
-                  }}
-                >
-                  <BookOpen size={15} style={{ color: 'var(--accent-sapphire)' }} />
-                  <span>How much schoolwork do you have today?</span>
+              {/* Energy */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '4px', fontWeight: 600 }}>
+                  Energy Level
                 </label>
-                <span
-                  style={{
-                    fontSize: '0.82rem',
-                    fontWeight: 700,
-                    color: 'var(--accent-primary)',
-                    fontFamily: 'var(--font-mono)'
-                  }}
-                >
-                  {schoolworkMinutes === 0 ? 'None' : `${schoolworkMinutes} min`}
-                </span>
-              </div>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(5, 1fr)',
-                  gap: '8px'
-                }}
-              >
-                {schoolworkOptions.map((opt) => {
-                  const isSelected = schoolworkMinutes === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setSchoolworkMinutes(opt.value)}
-                      style={{
-                        padding: '10px 4px',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: isSelected ? 'var(--bg-card)' : 'var(--bg-surface)',
-                        border: isSelected ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-hairline)',
-                        color: isSelected ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                        fontSize: '0.82rem',
-                        fontWeight: isSelected ? 700 : 500,
-                        transition: 'all 0.18s ease'
-                      }}
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 6. GYM SCHEDULING (TIME, DURATION & SHOWER BUFFER) */}
-            <div
-              style={{
-                backgroundColor: 'var(--bg-surface)',
-                padding: '20px',
-                borderRadius: 'var(--radius-lg)',
-                border: '1px solid var(--border-hairline)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '16px'
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  flexWrap: 'wrap',
-                  gap: '10px'
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      fontSize: '0.92rem',
-                      fontWeight: 700,
-                      color: 'var(--text-primary)'
-                    }}
-                  >
-                    <Dumbbell size={17} style={{ color: 'var(--accent-coral)' }} />
-                    <span>Gym today?</span>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: '0.76rem',
-                      color: 'var(--text-muted)',
-                      marginTop: '2px'
-                    }}
-                  >
-                    Set your preferred workout start time and duration.
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  {['Yes', 'No'].map((choice) => {
-                    const val = choice === 'Yes';
-                    const isSelected = gymToday === val;
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {[
+                    { id: 'low', label: 'Low' },
+                    { id: 'normal', label: 'Normal' },
+                    { id: 'high', label: 'High' }
+                  ].map((e) => {
+                    const isSel = energy === e.id;
                     return (
                       <button
-                        key={choice}
+                        key={e.id}
                         type="button"
-                        onClick={() => setGymToday(val)}
+                        onClick={() => setEnergy(e.id)}
                         style={{
-                          padding: '8px 18px',
-                          borderRadius: 'var(--radius-pill)',
-                          backgroundColor: isSelected ? 'var(--accent-primary)' : 'var(--bg-card)',
-                          color: isSelected ? '#06070a' : 'var(--text-secondary)',
+                          flex: 1,
+                          padding: '6px 4px',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: '0.74rem',
                           fontWeight: 700,
-                          fontSize: '0.82rem',
-                          border: isSelected ? 'none' : '1px solid var(--border-hairline)',
-                          transition: 'all 0.18s ease'
+                          backgroundColor: isSel ? 'var(--accent-primary)' : 'var(--bg-card)',
+                          color: isSel ? '#06070a' : 'var(--text-secondary)',
+                          border: isSel ? 'none' : '1px solid var(--border-hairline)',
+                          transition: 'all 0.16s ease'
                         }}
                       >
-                        {choice}
+                        {e.label}
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {gymToday && (
+              {/* Available Window Stat */}
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>
+                  Available Window
+                </div>
+                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
+                  {formatDuration(availableTotalMinutes)}
+                </div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                  {formatDuration(remainingAvailableMinutes)} unassigned
+                </div>
+              </div>
+            </div>
+
+            {/* 2. TIMELINE BUILT SO FAR */}
+            {calculatedBlocks.length > 0 && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>Your Planned Schedule ({calculatedBlocks.length} blocks)</span>
+                  </label>
+                  <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                    Total: {formatDuration(totalScheduledMinutes)}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {calculatedBlocks.map((b, idx) => (
+                    <div
+                      key={b.id || idx}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        backgroundColor: 'var(--bg-surface)',
+                        border: '1px solid var(--border-hairline)',
+                        gap: '12px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', width: '18px' }}>
+                          {idx + 1}
+                        </span>
+                        <span style={{ fontSize: '1.1rem' }}>{b.icon || '📌'}</span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {b.title}
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                            {b.startTime} — {b.endTime}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Inline Duration Adjuster (+/- 15m) & Delete */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => handleAdjustDuration(idx, -15)}
+                          disabled={b.durationMinutes <= 15}
+                          style={{
+                            padding: '3px 7px',
+                            borderRadius: 'var(--radius-sm)',
+                            backgroundColor: 'var(--bg-card)',
+                            color: 'var(--text-secondary)',
+                            border: '1px solid var(--border-hairline)',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            opacity: b.durationMinutes <= 15 ? 0.4 : 1
+                          }}
+                        >
+                          -15m
+                        </button>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)', minWidth: '42px', textAlign: 'center' }}>
+                          {formatDuration(b.durationMinutes)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleAdjustDuration(idx, 15)}
+                          style={{
+                            padding: '3px 7px',
+                            borderRadius: 'var(--radius-sm)',
+                            backgroundColor: 'var(--bg-card)',
+                            color: 'var(--text-secondary)',
+                            border: '1px solid var(--border-hairline)',
+                            fontSize: '0.72rem',
+                            fontWeight: 700
+                          }}
+                        >
+                          +15m
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveBlock(idx)}
+                          style={{
+                            padding: '5px',
+                            borderRadius: 'var(--radius-sm)',
+                            color: 'var(--text-muted)',
+                            marginLeft: '4px'
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent-coral)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 3. INTERACTIVE "WHAT DO YOU WANT TO DO FIRST?" / "WHAT'S NEXT?" SECTION */}
+            <div
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                border: '1.5px solid var(--accent-primary-faint)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '22px',
+                position: 'relative'
+              }}
+            >
+              {/* Question Header */}
+              <div style={{ marginBottom: '16px' }}>
+                <div
+                  style={{
+                    fontSize: '1.15rem',
+                    fontWeight: 800,
+                    color: 'var(--text-primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  <Sparkles size={18} style={{ color: 'var(--accent-primary)' }} />
+                  <span>
+                    {calculatedBlocks.length === 0
+                      ? 'What do you want to do first?'
+                      : "What's next?"}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  Starting at <strong style={{ color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>{nextStartTimeStr}</strong>
+                  {remainingAvailableMinutes > 0 && ` · ${formatDuration(remainingAvailableMinutes)} unassigned`}
+                </div>
+              </div>
+
+              {/* Activity Selector (if no active selection) */}
+              {!selectedActivity ? (
+                <div>
+                  {/* Goals Section */}
+                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                    My Goals
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+                      gap: '8px',
+                      marginBottom: '16px'
+                    }}
+                  >
+                    {goals.map((g) => (
+                      <button
+                        key={g.id}
+                        type="button"
+                        onClick={() => handleSelectActivity(g)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '10px 12px',
+                          borderRadius: 'var(--radius-md)',
+                          backgroundColor: 'var(--bg-card)',
+                          border: '1px solid var(--border-hairline)',
+                          color: 'var(--text-primary)',
+                          textAlign: 'left',
+                          transition: 'all 0.16s ease'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                          e.currentTarget.style.transform = 'translateY(-1px)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--border-hairline)';
+                          e.currentTarget.style.transform = 'none';
+                        }}
+                      >
+                        <span style={{ fontSize: '1.2rem', flexShrink: 0 }}>{g.icon || '🎯'}</span>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: '0.84rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {g.name}
+                          </div>
+                          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                            {g.weeklyTarget} {g.unit}/wk
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Built-in Activities / Categories */}
+                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                    Activities & Downtime
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                      gap: '8px',
+                      marginBottom: '16px'
+                    }}
+                  >
+                    {BUILT_IN_ACTIVITIES.map((act) => (
+                      <button
+                        key={act.id}
+                        type="button"
+                        onClick={() => handleSelectActivity(act)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '10px 12px',
+                          borderRadius: 'var(--radius-md)',
+                          backgroundColor: 'var(--bg-card)',
+                          border: '1px solid var(--border-hairline)',
+                          color: 'var(--text-primary)',
+                          textAlign: 'left',
+                          transition: 'all 0.16s ease'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--accent-emerald)';
+                          e.currentTarget.style.transform = 'translateY(-1px)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--border-hairline)';
+                          e.currentTarget.style.transform = 'none';
+                        }}
+                      >
+                        <span style={{ fontSize: '1.15rem', flexShrink: 0 }}>{act.icon}</span>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: '0.82rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {act.name}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+
+                    {/* Custom Activity */}
+                    <button
+                      type="button"
+                      onClick={() => handleSelectActivity({ id: 'custom', name: '', icon: '✨', defaultDuration: 30 })}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '10px 12px',
+                        borderRadius: 'var(--radius-md)',
+                        backgroundColor: 'var(--bg-card)',
+                        border: '1px dashed var(--border-subtle)',
+                        color: 'var(--text-secondary)',
+                        textAlign: 'left',
+                        transition: 'all 0.16s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                        e.currentTarget.style.color = 'var(--text-primary)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                        e.currentTarget.style.color = 'var(--text-secondary)';
+                      }}
+                    >
+                      <Plus size={16} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
+                      <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Custom Activity</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* DURATION & DETAILS CONFIGURATION FOR CHOSEN ACTIVITY */
                 <div
                   style={{
                     backgroundColor: 'var(--bg-card)',
                     borderRadius: 'var(--radius-md)',
-                    padding: '16px',
-                    border: '1px solid var(--border-subtle)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '16px'
+                    padding: '18px',
+                    border: '1px solid var(--border-subtle)'
                   }}
                 >
-                  {/* Gym Preferred Start Time */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                      What time do you want to go to the gym?
-                    </label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                      <Clock size={15} style={{ color: 'var(--accent-coral)' }} />
-                      <input
-                        type="text"
-                        value={gymStartTime === 'flexible' ? '' : gymStartTime}
-                        onChange={(e) => setGymStartTime(e.target.value || 'flexible')}
-                        placeholder="e.g. 7:00 PM (or Flexible)"
-                        style={{
-                          width: '100%',
-                          padding: '8px 12px',
-                          borderRadius: 'var(--radius-sm)',
-                          backgroundColor: 'var(--bg-primary)',
-                          border: '1px solid var(--border-subtle)',
-                          color: 'var(--text-primary)',
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '0.9rem',
-                          fontWeight: 600
-                        }}
-                      />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '1.3rem' }}>{selectedActivity.icon}</span>
+                      <div>
+                        {selectedActivity.id === 'custom' ? (
+                          <input
+                            type="text"
+                            value={customTitleInput}
+                            onChange={(e) => setCustomTitleInput(e.target.value)}
+                            placeholder="e.g. Piano Practice, Coding, Reading"
+                            autoFocus
+                            style={{
+                              padding: '6px 10px',
+                              borderRadius: 'var(--radius-sm)',
+                              backgroundColor: 'var(--bg-primary)',
+                              border: '1px solid var(--accent-primary)',
+                              color: 'var(--text-primary)',
+                              fontSize: '0.92rem',
+                              fontWeight: 700
+                            }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                            {selectedActivity.name}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                      {gymTimePresets.map((preset) => {
-                        const isPresetActive =
-                          preset === 'Flexible'
-                            ? gymStartTime === 'flexible'
-                            : gymStartTime === preset;
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedActivity(null)}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '0.72rem',
+                        color: 'var(--text-muted)',
+                        backgroundColor: 'var(--bg-surface)',
+                        borderRadius: 'var(--radius-sm)'
+                      }}
+                    >
+                      Change Activity
+                    </button>
+                  </div>
+
+                  {/* Duration Prompt & Presets */}
+                  <div style={{ marginBottom: '14px' }}>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '8px', fontWeight: 600 }}>
+                      How long do you want to spend on this?
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: '6px', marginBottom: '8px' }}>
+                      {durationPresets.map((dp) => {
+                        const isSel = selectedDuration === dp.value && !customDurationInput;
                         return (
                           <button
-                            key={preset}
+                            key={dp.value}
                             type="button"
-                            onClick={() => setGymStartTime(preset === 'Flexible' ? 'flexible' : preset)}
+                            onClick={() => {
+                              setSelectedDuration(dp.value);
+                              setCustomDurationInput('');
+                            }}
                             style={{
-                              padding: '4px 10px',
+                              padding: '10px 4px',
                               borderRadius: 'var(--radius-sm)',
-                              fontSize: '0.74rem',
-                              fontWeight: 600,
-                              backgroundColor: isPresetActive ? 'var(--accent-coral)' : 'var(--bg-primary)',
-                              color: isPresetActive ? '#06070a' : 'var(--text-secondary)',
-                              border: isPresetActive ? 'none' : '1px solid var(--border-hairline)',
+                              backgroundColor: isSel ? 'var(--accent-primary)' : 'var(--bg-primary)',
+                              color: isSel ? '#06070a' : 'var(--text-secondary)',
+                              fontWeight: 700,
+                              fontSize: '0.8rem',
+                              border: isSel ? 'none' : '1px solid var(--border-hairline)',
                               transition: 'all 0.16s ease'
                             }}
                           >
-                            {preset}
+                            {dp.label}
                           </button>
                         );
                       })}
                     </div>
+
+                    {/* Custom minutes input */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Or custom minutes:</span>
+                      <input
+                        type="number"
+                        min="5"
+                        max="240"
+                        step="5"
+                        value={customDurationInput}
+                        onChange={(e) => {
+                          setCustomDurationInput(e.target.value);
+                          if (e.target.value) {
+                            setSelectedDuration(parseInt(e.target.value, 10) || 30);
+                          }
+                        }}
+                        placeholder="e.g. 75"
+                        style={{
+                          width: '90px',
+                          padding: '6px 10px',
+                          borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'var(--bg-primary)',
+                          border: '1px solid var(--border-hairline)',
+                          color: 'var(--text-primary)',
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '0.84rem'
+                        }}
+                      />
+                    </div>
                   </div>
 
-                  {/* Gym Duration Options */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                      Expected workout duration
+                  {/* Optional Note / Topic */}
+                  <div style={{ marginBottom: '16px' }}>
+                    <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                      Optional Note / Focus Area:
                     </label>
-                    <div
+                    <input
+                      type="text"
+                      value={customNoteInput}
+                      onChange={(e) => setCustomNoteInput(e.target.value)}
+                      placeholder="e.g. Chapter 4 review, Section 2 problems, Chest & arms"
                       style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))',
-                        gap: '8px'
+                        width: '100%',
+                        padding: '6px 10px',
+                        borderRadius: 'var(--radius-sm)',
+                        backgroundColor: 'var(--bg-primary)',
+                        border: '1px solid var(--border-hairline)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.84rem'
                       }}
-                    >
-                      {gymDurationOptions.map((opt) => {
-                        const isSelected = gymDuration === opt.value;
-                        return (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            onClick={() => setGymDuration(opt.value)}
-                            style={{
-                              padding: '8px 6px',
-                              borderRadius: 'var(--radius-sm)',
-                              backgroundColor: isSelected ? 'var(--accent-primary)' : 'var(--bg-primary)',
-                              border: isSelected ? 'none' : '1px solid var(--border-hairline)',
-                              color: isSelected ? '#06070a' : 'var(--text-secondary)',
-                              fontSize: '0.8rem',
-                              fontWeight: isSelected ? 700 : 500,
-                              transition: 'all 0.18s ease'
-                            }}
-                          >
-                            {opt.label}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    />
                   </div>
 
-                  {/* Post-Gym Shower & Cooldown Buffer */}
-                  <div
+                  {/* Add Block Button */}
+                  <button
+                    type="button"
+                    onClick={handleAddCurrentBlock}
                     style={{
+                      width: '100%',
+                      padding: '12px 18px',
+                      borderRadius: 'var(--radius-md)',
+                      backgroundColor: 'var(--accent-primary)',
+                      color: '#06070a',
+                      fontWeight: 700,
+                      fontSize: '0.92rem',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'space-between',
-                      paddingTop: '8px',
-                      borderTop: '1px solid var(--border-hairline)'
+                      justifyContent: 'center',
+                      gap: '8px',
+                      boxShadow: '0 4px 16px rgba(56, 189, 248, 0.25)'
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Bath size={15} style={{ color: 'var(--accent-emerald)' }} />
-                      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                        Post-workout shower & cooldown buffer:
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      {[
-                        { label: 'None', val: 0 },
-                        { label: '15m', val: 15 },
-                        { label: '20m', val: 20 }
-                      ].map((buf) => {
-                        const isBufSelected = gymBufferMinutes === buf.val;
-                        return (
-                          <button
-                            key={buf.label}
-                            type="button"
-                            onClick={() => setGymBufferMinutes(buf.val)}
-                            style={{
-                              padding: '4px 10px',
-                              borderRadius: 'var(--radius-sm)',
-                              fontSize: '0.72rem',
-                              fontWeight: 600,
-                              backgroundColor: isBufSelected ? 'var(--accent-emerald)' : 'var(--bg-primary)',
-                              color: isBufSelected ? '#06070a' : 'var(--text-secondary)',
-                              border: isBufSelected ? 'none' : '1px solid var(--border-hairline)'
-                            }}
-                          >
-                            {buf.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                    <span>+ Add Block ({nextStartTimeStr} — {minutesToTimeString(nextStartMin + (parseInt(customDurationInput, 10) || selectedDuration))})</span>
+                    <ArrowRight size={16} />
+                  </button>
                 </div>
               )}
             </div>
 
-            {/* 7. DESIRED FREE TIME */}
-            <div>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: '10px'
-                }}
-              >
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    fontSize: '0.85rem',
-                    fontWeight: 600,
-                    color: 'var(--text-primary)'
-                  }}
-                >
-                  <Coffee size={15} style={{ color: 'var(--accent-emerald)' }} />
-                  <span>How much free time do you want?</span>
-                </label>
-                <span
-                  style={{
-                    fontSize: '0.75rem',
-                    color: 'var(--accent-emerald)',
-                    fontWeight: 600
-                  }}
-                >
-                  Protected at end of day
-                </span>
-              </div>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(4, 1fr)',
-                  gap: '8px'
-                }}
-              >
-                {freeTimeOptions.map((opt) => {
-                  const isSelected = freeTimeMinutes === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setFreeTimeMinutes(opt.value)}
-                      style={{
-                        padding: '10px 6px',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: isSelected ? 'var(--bg-card)' : 'var(--bg-surface)',
-                        border: isSelected ? '1.5px solid var(--accent-emerald)' : '1px solid var(--border-hairline)',
-                        color: isSelected ? 'var(--accent-emerald)' : 'var(--text-secondary)',
-                        fontSize: '0.82rem',
-                        fontWeight: isSelected ? 700 : 500,
-                        transition: 'all 0.18s ease'
-                      }}
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
           </div>
 
-          {/* Submit Button */}
-          <div style={{ marginTop: '32px' }}>
+          {/* Bottom Action: Done Planning / Finish */}
+          <div
+            style={{
+              marginTop: '32px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              alignItems: 'center'
+            }}
+          >
             <button
-              type="submit"
+              type="button"
+              onClick={handleFinishPlanning}
               style={{
                 width: '100%',
                 padding: '16px 24px',
                 borderRadius: 'var(--radius-lg)',
                 backgroundColor: 'var(--accent-primary)',
                 color: '#06070a',
-                fontSize: '1rem',
-                fontWeight: 700,
+                fontSize: '1.05rem',
+                fontWeight: 800,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '10px',
-                boxShadow: '0 4px 20px rgba(56, 189, 248, 0.25)',
+                boxShadow: '0 4px 24px rgba(56, 189, 248, 0.3)',
                 transition: 'all 0.2s ease'
               }}
               onMouseEnter={(e) => {
@@ -1166,11 +926,19 @@ export default function CheckInModal({
                 e.currentTarget.style.transform = 'none';
               }}
             >
-              <Sparkles size={18} />
-              <span>Let Orbit Build My Day →</span>
+              <Check size={20} />
+              <span>
+                {calculatedBlocks.length === 0
+                  ? 'I’m Done Planning → View Overview'
+                  : `Done Planning (${calculatedBlocks.length} blocks) → View My Day`}
+              </span>
             </button>
+
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+              Free time and gaps are completely supported · You can adjust durations anytime.
+            </div>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );
