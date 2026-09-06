@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   ArrowRight,
@@ -12,7 +12,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import OrbitPlanet from './OrbitPlanet';
-import { getGreeting, getFormattedCurrentDate, formatDuration } from '../utils/timeHelpers';
+import { getGreeting, getFormattedCurrentDate, formatDuration, getCurrentTimeString } from '../utils/timeHelpers';
 
 export default function Today({
   planState,
@@ -26,43 +26,52 @@ export default function Today({
   onNavigate,
   onResetDay
 }) {
+  const [currentTimeStr, setCurrentTimeStr] = useState(() => getCurrentTimeString());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTimeStr(getCurrentTimeString());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const greeting = getGreeting('Emmanuel');
   const currentDate = getFormattedCurrentDate();
   const dayState = planState?.dayState || 'idle';
 
   return (
-    <div className="today-view animate-fade-in" style={{ padding: '32px 40px 60px', maxWidth: '1180px', margin: '0 auto' }}>
+    <div className="today-view animate-fade-in" style={{ padding: '24px 32px 48px', maxWidth: '1120px', margin: '0 auto' }}>
       
-      {/* Top Header: Greeting, Date & Quick Home Check-in */}
+      {/* Top Header: Greeting, Date & Live Clock */}
       <div
         style={{
           display: 'flex',
           flexWrap: 'wrap',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: '16px',
-          marginBottom: '36px',
-          paddingBottom: '24px',
+          gap: '14px',
+          marginBottom: '24px',
+          paddingBottom: '18px',
           borderBottom: '1px solid var(--border-hairline)'
         }}
       >
         <div>
           <div
             style={{
-              fontSize: '0.8rem',
+              fontSize: '0.74rem',
               fontWeight: 700,
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
               color: 'var(--accent-primary)',
               fontFamily: 'var(--font-mono)',
-              marginBottom: '4px'
+              marginBottom: '2px'
             }}
           >
             {currentDate}
           </div>
           <h1
             style={{
-              fontSize: '2rem',
+              fontSize: '1.85rem',
               fontWeight: 800,
               color: 'var(--text-primary)',
               letterSpacing: '-0.03em'
@@ -72,36 +81,57 @@ export default function Today({
           </h1>
         </div>
 
-        {/* "I'm home" Action */}
-        <button
-          onClick={onHomeCheckIn}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '10px',
-            padding: '12px 22px',
-            borderRadius: 'var(--radius-pill)',
-            backgroundColor: 'var(--bg-card)',
-            color: 'var(--text-primary)',
-            border: '1px solid var(--border-subtle)',
-            fontWeight: 600,
-            fontSize: '0.9rem',
-            boxShadow: 'var(--shadow-sm)',
-            transition: 'all 0.2s ease'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'var(--accent-primary)';
-            e.currentTarget.style.transform = 'translateY(-1px)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'var(--border-subtle)';
-            e.currentTarget.style.transform = 'none';
-          }}
-        >
-          <span style={{ fontSize: '1.1rem' }}>🏠</span>
-          <span>I'm home</span>
-          <ArrowRight size={16} style={{ color: 'var(--accent-primary)' }} />
-        </button>
+        {/* Live Real-Time Clock & Home Check-in */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 14px',
+              borderRadius: 'var(--radius-pill)',
+              backgroundColor: 'var(--bg-card)',
+              color: 'var(--text-secondary)',
+              border: '1px solid var(--border-hairline)',
+              fontSize: '0.82rem',
+              fontFamily: 'var(--font-mono)',
+              fontWeight: 600
+            }}
+          >
+            <Clock size={14} style={{ color: 'var(--accent-primary)' }} />
+            <span>Real Time: <strong style={{ color: 'var(--text-primary)' }}>{currentTimeStr}</strong></span>
+          </div>
+
+          <button
+            onClick={onHomeCheckIn}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '10px 18px',
+              borderRadius: 'var(--radius-pill)',
+              backgroundColor: 'var(--bg-card)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-subtle)',
+              fontWeight: 600,
+              fontSize: '0.86rem',
+              boxShadow: 'var(--shadow-sm)',
+              transition: 'all 0.18s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'var(--accent-primary)';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'var(--border-subtle)';
+              e.currentTarget.style.transform = 'none';
+            }}
+          >
+            <span style={{ fontSize: '1rem' }}>🏠</span>
+            <span>I'm home</span>
+            <ArrowRight size={14} style={{ color: 'var(--accent-primary)' }} />
+          </button>
+        </div>
       </div>
 
       {/* COMPLETED DAY STATE */}
@@ -111,9 +141,9 @@ export default function Today({
             backgroundColor: 'var(--bg-surface)',
             border: '1px solid var(--border-subtle)',
             borderRadius: 'var(--radius-xl)',
-            padding: '48px 36px',
+            padding: '36px 28px',
             textAlign: 'center',
-            marginBottom: '40px',
+            marginBottom: '32px',
             position: 'relative',
             overflow: 'hidden'
           }}
@@ -122,30 +152,30 @@ export default function Today({
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '8px',
-              padding: '6px 14px',
+              gap: '6px',
+              padding: '5px 12px',
               borderRadius: 'var(--radius-pill)',
               backgroundColor: 'var(--accent-emerald-faint)',
               color: 'var(--accent-emerald)',
-              fontSize: '0.78rem',
+              fontSize: '0.74rem',
               fontWeight: 700,
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
-              marginBottom: '16px',
+              marginBottom: '12px',
               fontFamily: 'var(--font-mono)'
             }}
           >
-            <CheckCircle2 size={15} />
+            <CheckCircle2 size={14} />
             <span>TODAY COMPLETE</span>
           </div>
 
           <h2
             style={{
-              fontSize: '2.4rem',
+              fontSize: '2.1rem',
               fontWeight: 800,
               color: 'var(--text-primary)',
               letterSpacing: '-0.03em',
-              marginBottom: '12px'
+              marginBottom: '8px'
             }}
           >
             That's enough for today.
@@ -153,100 +183,49 @@ export default function Today({
 
           <p
             style={{
-              fontSize: '1.05rem',
+              fontSize: '0.96rem',
               color: 'var(--text-secondary)',
-              maxWidth: '560px',
-              margin: '0 auto 28px',
-              lineHeight: 1.5
+              maxWidth: '520px',
+              margin: '0 auto 24px',
+              lineHeight: 1.45
             }}
           >
             You showed up, made progress on your junior year goals, and protected your time and recovery.
           </p>
 
-          {/* Quick Summary Metrics */}
-          {planState?.schedule && (
-            <div
-              style={{
-                display: 'inline-flex',
-                flexWrap: 'wrap',
-                justifyContent: 'center',
-                gap: '24px',
-                padding: '16px 28px',
-                backgroundColor: 'var(--bg-card)',
-                borderRadius: 'var(--radius-lg)',
-                border: '1px solid var(--border-hairline)',
-                marginBottom: '32px'
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>
-                  Total Focus Time
-                </div>
-                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--accent-primary)' }}>
-                  {planState.totalFocusedFormatted || '0m'}
-                </div>
-              </div>
-              <div style={{ borderLeft: '1px solid var(--border-hairline)', paddingLeft: '24px' }}>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>
-                  Completed Blocks
-                </div>
-                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                  {planState.blocks?.length || 0} blocks
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div>
-            <button
-              onClick={onOpenCheckIn}
-              style={{
-                padding: '14px 28px',
-                borderRadius: 'var(--radius-lg)',
-                backgroundColor: 'var(--accent-primary)',
-                color: '#08090C',
-                fontWeight: 700,
-                fontSize: '0.95rem',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                marginRight: '12px',
-                boxShadow: '0 4px 18px rgba(56, 189, 248, 0.25)'
-              }}
-            >
-              <Sparkles size={16} />
-              <span>Plan Another Session →</span>
-            </button>
-            <button
-              onClick={() => onNavigate('progress')}
-              style={{
-                padding: '14px 24px',
-                borderRadius: 'var(--radius-lg)',
-                backgroundColor: 'var(--bg-card)',
-                color: 'var(--text-secondary)',
-                fontWeight: 600,
-                fontSize: '0.95rem',
-                border: '1px solid var(--border-subtle)'
-              }}
-            >
-              See Progress & Year Record →
-            </button>
-          </div>
+          <button
+            onClick={onResetDay}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '12px 24px',
+              borderRadius: 'var(--radius-lg)',
+              backgroundColor: 'var(--bg-card)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-subtle)',
+              fontSize: '0.9rem',
+              fontWeight: 600
+            }}
+          >
+            <RotateCcw size={15} />
+            <span>Plan Another Session</span>
+          </button>
         </div>
       ) : (
-        /* ORBIT HERO SECTION */
+        /* HERO PLANNING CARD */
         <div
-          className="orbit-hero-card"
+          className="hero-card"
           style={{
             backgroundColor: 'var(--bg-surface)',
             border: '1px solid var(--border-subtle)',
             borderRadius: 'var(--radius-xl)',
-            padding: '36px 40px',
-            marginBottom: '40px',
+            padding: '28px 32px',
+            marginBottom: '28px',
             display: 'grid',
-            gridTemplateColumns: 'minmax(320px, 1.4fr) minmax(200px, 1fr)',
+            gridTemplateColumns: 'minmax(300px, 1.4fr) minmax(180px, 1fr)',
             alignItems: 'center',
-            gap: '32px',
+            gap: '24px',
             position: 'relative',
             overflow: 'hidden'
           }}
@@ -258,30 +237,30 @@ export default function Today({
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px',
-                padding: '5px 12px',
+                padding: '4px 10px',
                 borderRadius: 'var(--radius-pill)',
                 backgroundColor: 'var(--accent-primary-faint)',
                 color: 'var(--accent-primary)',
-                fontSize: '0.74rem',
+                fontSize: '0.72rem',
                 fontWeight: 700,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
-                marginBottom: '18px',
+                marginBottom: '12px',
                 fontFamily: 'var(--font-mono)'
               }}
             >
-              <Sparkles size={13} />
+              <Sparkles size={12} />
               <span>ORBIT</span>
             </div>
 
             <h2
               style={{
-                fontSize: '2.1rem',
+                fontSize: '1.9rem',
                 fontWeight: 800,
                 color: 'var(--text-primary)',
-                lineHeight: 1.18,
+                lineHeight: 1.2,
                 letterSpacing: '-0.03em',
-                marginBottom: '14px'
+                marginBottom: '10px'
               }}
             >
               "Your life doesn't need a blueprint. You just need to decide what's next."
@@ -289,11 +268,11 @@ export default function Today({
 
             <p
               style={{
-                fontSize: '0.98rem',
+                fontSize: '0.92rem',
                 color: 'var(--text-secondary)',
-                lineHeight: 1.55,
-                marginBottom: '28px',
-                maxWidth: '520px'
+                lineHeight: 1.5,
+                marginBottom: '22px',
+                maxWidth: '480px'
               }}
             >
               Build your schedule one block at a time. Pick what matters, set the duration, and take control of your day.
@@ -306,15 +285,15 @@ export default function Today({
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '10px',
-                  padding: '16px 28px',
+                  gap: '8px',
+                  padding: '14px 26px',
                   borderRadius: 'var(--radius-lg)',
                   backgroundColor: 'var(--accent-primary)',
                   color: '#06070a',
-                  fontSize: '1rem',
+                  fontSize: '0.96rem',
                   fontWeight: 700,
-                  boxShadow: '0 4px 20px rgba(56, 189, 248, 0.25)',
-                  transition: 'all 0.2s ease'
+                  boxShadow: '0 4px 18px rgba(56, 189, 248, 0.25)',
+                  transition: 'all 0.18s ease'
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = 'var(--accent-primary-hover)';
@@ -325,29 +304,29 @@ export default function Today({
                   e.currentTarget.style.transform = 'none';
                 }}
               >
-                <Sparkles size={18} />
+                <Sparkles size={16} />
                 <span>Build My Day (Block by Block) →</span>
               </button>
             )}
 
             {dayState === 'planned' && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                 <button
                   onClick={onStartDay}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '10px',
-                    padding: '16px 28px',
+                    gap: '8px',
+                    padding: '14px 24px',
                     borderRadius: 'var(--radius-lg)',
                     backgroundColor: 'var(--accent-primary)',
-                    color: '#08090C',
-                    fontSize: '1rem',
+                    color: '#06070a',
+                    fontSize: '0.96rem',
                     fontWeight: 700,
-                    boxShadow: '0 4px 20px rgba(56, 189, 248, 0.25)'
+                    boxShadow: '0 4px 18px rgba(56, 189, 248, 0.25)'
                   }}
                 >
-                  <Play size={18} fill="#08090C" />
+                  <Play size={16} fill="#06070a" />
                   <span>START MY DAY →</span>
                 </button>
                 <button
@@ -355,13 +334,13 @@ export default function Today({
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '8px',
-                    padding: '16px 22px',
+                    gap: '6px',
+                    padding: '14px 18px',
                     borderRadius: 'var(--radius-lg)',
                     backgroundColor: 'var(--bg-card)',
                     color: 'var(--text-primary)',
                     border: '1px solid var(--border-subtle)',
-                    fontSize: '0.92rem',
+                    fontSize: '0.88rem',
                     fontWeight: 600
                   }}
                 >
@@ -371,23 +350,23 @@ export default function Today({
             )}
 
             {dayState === 'active' && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                 <button
                   onClick={onResumeDay}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '10px',
-                    padding: '16px 28px',
+                    gap: '8px',
+                    padding: '14px 24px',
                     borderRadius: 'var(--radius-lg)',
                     backgroundColor: 'var(--accent-primary)',
-                    color: '#08090C',
-                    fontSize: '1rem',
+                    color: '#06070a',
+                    fontSize: '0.96rem',
                     fontWeight: 700,
-                    boxShadow: '0 4px 20px rgba(56, 189, 248, 0.25)'
+                    boxShadow: '0 4px 18px rgba(56, 189, 248, 0.25)'
                   }}
                 >
-                  <Play size={18} fill="#08090C" />
+                  <Play size={16} fill="#06070a" />
                   <span>Resume my day →</span>
                 </button>
                 <button
@@ -395,13 +374,13 @@ export default function Today({
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '8px',
-                    padding: '16px 20px',
+                    gap: '6px',
+                    padding: '14px 18px',
                     borderRadius: 'var(--radius-lg)',
                     backgroundColor: 'var(--bg-card)',
                     color: 'var(--text-secondary)',
                     border: '1px solid var(--border-subtle)',
-                    fontSize: '0.92rem',
+                    fontSize: '0.88rem',
                     fontWeight: 600
                   }}
                 >
@@ -411,7 +390,7 @@ export default function Today({
             )}
           </div>
 
-          {/* Right Orbit Visual: Responsive, Contained & Scalable */}
+          {/* Right Orbit Visual */}
           <div
             style={{
               display: 'flex',
@@ -419,7 +398,7 @@ export default function Today({
               justifyContent: 'center',
               position: 'relative',
               width: '100%',
-              minHeight: '220px'
+              minHeight: '190px'
             }}
           >
             <OrbitPlanet size="hero" />
@@ -434,20 +413,20 @@ export default function Today({
             backgroundColor: 'var(--bg-card)',
             border: '1px solid var(--border-subtle)',
             borderRadius: 'var(--radius-lg)',
-            padding: '20px 28px',
-            marginBottom: '36px',
+            padding: '16px 22px',
+            marginBottom: '28px',
             display: 'flex',
             flexWrap: 'wrap',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: '16px'
+            gap: '14px'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div
               style={{
-                width: '44px',
-                height: '44px',
+                width: '38px',
+                height: '38px',
                 borderRadius: '50%',
                 backgroundColor: 'var(--accent-primary-faint)',
                 display: 'flex',
@@ -456,16 +435,16 @@ export default function Today({
                 color: 'var(--accent-primary)'
               }}
             >
-              <Clock size={20} />
+              <Clock size={18} />
             </div>
             <div>
-              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-primary)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent-primary)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>
                 PLAN READY
               </div>
-              <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              <div style={{ fontSize: '0.96rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 Orbit has your afternoon mapped out.
               </div>
-              <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                 {planState.blocks?.length || 0} blocks · {planState.totalFocusedFormatted || '0m'} focus · Done around {planState.scheduledEndTime}
               </div>
             </div>
@@ -474,28 +453,26 @@ export default function Today({
           <button
             onClick={onStartDay}
             style={{
-              padding: '12px 24px',
+              padding: '10px 20px',
               borderRadius: 'var(--radius-md)',
               backgroundColor: 'var(--accent-primary)',
-              color: '#08090C',
+              color: '#06070a',
               fontWeight: 700,
-              fontSize: '0.9rem',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px'
+              fontSize: '0.88rem'
             }}
           >
-            <span>START MY DAY →</span>
+            Start Now →
           </button>
         </div>
       )}
 
-      {/* TWO COLUMN SECTION: Priorities & Philosophy */}
+      {/* LOWER GRID: Ranked Priorities & Philosophy */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-          gap: '28px'
+          gridTemplateColumns: 'minmax(320px, 1.2fr) minmax(280px, 1fr)',
+          gap: '20px',
+          alignItems: 'stretch'
         }}
       >
         {/* Ranked Priorities Card */}
@@ -504,7 +481,7 @@ export default function Today({
             backgroundColor: 'var(--bg-surface)',
             border: '1px solid var(--border-hairline)',
             borderRadius: 'var(--radius-xl)',
-            padding: '28px',
+            padding: '22px',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between'
@@ -513,35 +490,36 @@ export default function Today({
           <div>
             <div
               style={{
-                fontSize: '0.72rem',
+                fontSize: '0.7rem',
                 fontWeight: 700,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
                 color: 'var(--text-muted)',
                 fontFamily: 'var(--font-mono)',
-                marginBottom: '4px'
+                marginBottom: '2px'
               }}
             >
               TODAY
             </div>
             <h3
               style={{
-                fontSize: '1.35rem',
+                fontSize: '1.2rem',
                 fontWeight: 700,
                 color: 'var(--text-primary)',
                 letterSpacing: '-0.02em',
-                marginBottom: '20px'
+                marginBottom: '14px'
               }}
             >
               Your priorities
             </h3>
 
-            {/* Priorities List with Ranking Numbers */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {/* Priorities List with Recommendation Highlighting */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {(rankedGoals || []).slice(0, 5).map((goal) => {
                 const target = goal.weeklyTarget || 1;
                 const completed = goal.completed || 0;
                 const pct = Math.min(100, Math.round((completed / target) * 100));
+                const isRec = goal.isRecommended;
 
                 return (
                   <div
@@ -549,35 +527,32 @@ export default function Today({
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '14px',
-                      padding: '12px 14px',
+                      gap: '12px',
+                      padding: '10px 12px',
                       borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'var(--bg-card)',
-                      border: '1px solid var(--border-hairline)',
+                      backgroundColor: isRec ? 'rgba(56, 189, 248, 0.05)' : 'var(--bg-card)',
+                      border: isRec ? '1px solid var(--accent-primary-faint)' : '1px solid var(--border-hairline)',
                       transition: 'transform 0.18s ease'
                     }}
                   >
-                    {/* Ranking Number */}
                     <span
                       style={{
                         fontFamily: 'var(--font-mono)',
-                        fontSize: '0.86rem',
+                        fontSize: '0.82rem',
                         fontWeight: 700,
                         color: 'var(--accent-primary)',
-                        width: '24px'
+                        width: '20px'
                       }}
                     >
                       {goal.rank || '01'}
                     </span>
 
-                    {/* Icon */}
-                    <span style={{ fontSize: '1.25rem' }}>{goal.icon}</span>
+                    <span style={{ fontSize: '1.15rem' }}>{goal.icon}</span>
 
-                    {/* Title & Weekly Status */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div
                         style={{
-                          fontSize: '0.92rem',
+                          fontSize: '0.86rem',
                           fontWeight: 600,
                           color: 'var(--text-primary)',
                           whiteSpace: 'nowrap',
@@ -589,30 +564,29 @@ export default function Today({
                       </div>
                       <div
                         style={{
-                          fontSize: '0.74rem',
+                          fontSize: '0.7rem',
                           color: 'var(--text-muted)',
-                          marginTop: '2px'
+                          marginTop: '1px'
                         }}
                       >
                         {completed} / {target} {goal.unit} this week ({pct}%)
                       </div>
                     </div>
 
-                    {/* Urgency or Status Tag */}
-                    {goal.isUrgent && (
+                    {isRec && (
                       <span
                         style={{
-                          fontSize: '0.68rem',
+                          fontSize: '0.62rem',
                           fontWeight: 700,
-                          color: 'var(--accent-coral)',
-                          backgroundColor: 'var(--accent-coral-faint)',
-                          padding: '3px 8px',
+                          color: 'var(--accent-primary)',
+                          backgroundColor: 'var(--accent-primary-faint)',
+                          padding: '2px 6px',
                           borderRadius: 'var(--radius-pill)',
                           textTransform: 'uppercase',
                           fontFamily: 'var(--font-mono)'
                         }}
                       >
-                        Urgent
+                        Recommended
                       </span>
                     )}
                   </div>
@@ -621,31 +595,31 @@ export default function Today({
             </div>
           </div>
 
-          <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-hairline)' }}>
+          <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border-hairline)' }}>
             <button
               onClick={() => onNavigate('goals')}
               style={{
-                fontSize: '0.85rem',
+                fontSize: '0.82rem',
                 fontWeight: 600,
                 color: 'var(--accent-primary)',
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '6px'
+                gap: '5px'
               }}
             >
               <span>Manage life priorities</span>
-              <ArrowRight size={14} />
+              <ArrowRight size={13} />
             </button>
           </div>
         </div>
 
-        {/* Philosophy Card: "Your life isn't a checklist." */}
+        {/* Philosophy Card */}
         <div
           style={{
             backgroundColor: 'var(--bg-surface)',
             border: '1px solid var(--border-hairline)',
             borderRadius: 'var(--radius-xl)',
-            padding: '28px',
+            padding: '22px',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between'
@@ -654,79 +628,41 @@ export default function Today({
           <div>
             <div
               style={{
-                fontSize: '0.72rem',
+                fontSize: '0.7rem',
                 fontWeight: 700,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
                 color: 'var(--text-muted)',
                 fontFamily: 'var(--font-mono)',
-                marginBottom: '4px'
+                marginBottom: '2px'
               }}
             >
-              THE IDEA
+              PHILOSOPHY
             </div>
             <h3
               style={{
-                fontSize: '1.35rem',
+                fontSize: '1.2rem',
                 fontWeight: 700,
                 color: 'var(--text-primary)',
                 letterSpacing: '-0.02em',
-                marginBottom: '16px'
+                marginBottom: '10px'
               }}
             >
-              Your life isn't a checklist.
+              "Your life isn't a checklist."
             </h3>
 
-            <p
-              style={{
-                fontSize: '0.9rem',
-                color: 'var(--text-secondary)',
-                lineHeight: 1.6,
-                marginBottom: '16px'
-              }}
-            >
-              Traditional productivity tools assume unlimited energy and rigid hours. Junior OS is built around what actually happens when you get home from school:
+            <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: '10px' }}>
+              Traditional productivity says: write everything down and feel guilty when you don't finish.
             </p>
-
-            <ul
-              style={{
-                listStyle: 'none',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px',
-                fontSize: '0.84rem',
-                color: 'var(--text-secondary)'
-              }}
-            >
-              <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ color: 'var(--accent-primary)' }}>•</span>
-                <span>Works around your busy hours and prioritizes your daily goals</span>
-              </li>
-              <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ color: 'var(--accent-sapphire)' }}>•</span>
-                <span>Adapts task depths to current physical & mental energy</span>
-              </li>
-              <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ color: 'var(--accent-emerald)' }}>•</span>
-                <span>Protects gym, breaks, and guaranteed free time before sleep</span>
-              </li>
-            </ul>
+            <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Orbit says: look at your energy, your available afternoon window, and your weekly goals — then decide what actually deserves your time today.
+            </p>
           </div>
 
-          <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border-hairline)' }}>
-            <button
-              onClick={() => onNavigate('progress')}
-              style={{
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                color: 'var(--accent-primary)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
-            >
-              <span>See where your time goes →</span>
-            </button>
+          <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border-hairline)' }}>
+            <div style={{ fontSize: '0.74rem', color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
+              Protected bedtime: {planState?.bedtime || '10:30 PM'}
+            </div>
           </div>
         </div>
       </div>

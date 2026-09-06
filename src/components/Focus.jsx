@@ -11,9 +11,11 @@ import {
   ChevronRight,
   Plus,
   RotateCcw,
-  Lock
+  Lock,
+  Square,
+  AlertCircle
 } from 'lucide-react';
-import { formatDuration } from '../utils/timeHelpers';
+import { formatDuration, getCurrentTimeString, getCurrentTimeMinutes } from '../utils/timeHelpers.js';
 
 const TIMER_STORAGE_KEY = 'orbitActiveTimer';
 
@@ -26,13 +28,16 @@ export default function Focus({
   onOpenPushLaterModal,
   onNavigateToOverview,
   activeBreak,
-  onEndBreakEarly
+  onEndBreakEarly,
+  onShiftScheduleOnResume,
+  onEndBlockEarly
 }) {
   const { blocks = [], activeIndex = 0, scheduledEndTime, hardEndTime } = planState || {};
   const currentBlock = blocks[activeIndex];
   const nextBlock = blocks[activeIndex + 1];
 
   const [isRunning, setIsRunning] = useState(true);
+  const [currentTimeStr, setCurrentTimeStr] = useState(() => getCurrentTimeString());
   const [secondsRemaining, setSecondsRemaining] = useState(
     (currentBlock?.remainingMinutes || currentBlock?.durationMinutes || 45) * 60
   );
@@ -49,6 +54,14 @@ export default function Focus({
     isRunning: true
   });
 
+  // Keep live clock updated every second
+  useEffect(() => {
+    const clockInterval = setInterval(() => {
+      setCurrentTimeStr(getCurrentTimeString());
+    }, 1000);
+    return () => clearInterval(clockInterval);
+  }, []);
+
   // Calculate current exact remaining seconds based on real-time timestamps
   const computeExactRemainingSeconds = useCallback(() => {
     const state = timerStateRef.current;
@@ -61,6 +74,20 @@ export default function Focus({
     }
 
     return Math.max(0, state.targetTotalSeconds - totalElapsed);
+  }, []);
+
+  // Calculate actual elapsed seconds worked on this block
+  const computeActualElapsedSeconds = useCallback(() => {
+    const state = timerStateRef.current;
+    if (!state.blockId) return 0;
+
+    let totalElapsed = state.elapsedBeforeResume;
+    if (state.isRunning && state.startTimeStamp) {
+      const currentSessionSec = Math.max(0, Math.floor((Date.now() - state.startTimeStamp) / 1000));
+      totalElapsed += currentSessionSec;
+    }
+
+    return totalElapsed;
   }, []);
 
   // Sync / Initialize timer when active block changes
@@ -91,9 +118,7 @@ export default function Focus({
           loadedFromStorage = true;
         }
       }
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
 
     if (!loadedFromStorage) {
       const elapsedAlready = Math.max(0, blockDurationSec - initialRemainingSec);
@@ -121,10 +146,8 @@ export default function Focus({
       setSecondsRemaining(exact);
     };
 
-    // Run tick on interval
     const interval = setInterval(updateTick, 500);
 
-    // Listen for tab focus, phone unlock, visibility change to immediately catch up 30m elapsed
     const handleVisibilityOrFocus = () => {
       updateTick();
     };
@@ -139,21 +162,28 @@ export default function Focus({
     };
   }, [computeExactRemainingSeconds]);
 
-  // Handle Play / Pause with timestamp preservation
+  // Handle Play / Pause with dynamic schedule recalculation
   const handleTogglePlayPause = () => {
     const state = timerStateRef.current;
     if (isRunning) {
-      // Pause
+      // PAUSE: record accumulated elapsed seconds and freeze
       const currentSessionSec = Math.max(0, Math.floor((Date.now() - state.startTimeStamp) / 1000));
       state.elapsedBeforeResume += currentSessionSec;
       state.isRunning = false;
       state.startTimeStamp = null;
       setIsRunning(false);
     } else {
-      // Resume
+      // RESUME: unfreeze, set new start timestamp, and shift the downstream schedule!
       state.startTimeStamp = Date.now();
       state.isRunning = true;
       setIsRunning(true);
+
+      const exactRemainingSec = Math.max(0, state.targetTotalSeconds - state.elapsedBeforeResume);
+      const remainingMinutes = Math.max(1, Math.round(exactRemainingSec / 60));
+
+      if (onShiftScheduleOnResume) {
+        onShiftScheduleOnResume(activeIndex, remainingMinutes);
+      }
     }
 
     try {
@@ -164,12 +194,32 @@ export default function Focus({
     setSecondsRemaining(exact);
   };
 
-  // Clean up timer storage when completing / canceling
+  // Complete block: passes actual elapsed worked minutes
   const handleBlockCompletion = () => {
     try {
       localStorage.removeItem(TIMER_STORAGE_KEY);
     } catch (e) {}
-    onCompleteBlock(currentBlock);
+
+    const actualSec = computeActualElapsedSeconds();
+    const actualWorkedMinutes = Math.max(1, Math.round(actualSec / 60));
+
+    onCompleteBlock(currentBlock, actualWorkedMinutes);
+  };
+
+  // End early: immediately stops timer, logs exact worked minutes, shifts remaining schedule to now
+  const handleEndEarly = () => {
+    try {
+      localStorage.removeItem(TIMER_STORAGE_KEY);
+    } catch (e) {}
+
+    const actualSec = computeActualElapsedSeconds();
+    const actualWorkedMinutes = Math.max(1, Math.round(actualSec / 60));
+
+    if (onEndBlockEarly) {
+      onEndBlockEarly(currentBlock, actualWorkedMinutes);
+    } else {
+      onCompleteBlock(currentBlock, actualWorkedMinutes);
+    }
   };
 
   const handleBlockCancellation = () => {
@@ -214,12 +264,15 @@ export default function Focus({
     )
   );
 
+  const actualElapsedSec = computeActualElapsedSeconds();
+  const actualWorkedMinutes = Math.max(0, Math.round(actualElapsedSec / 60));
+
   return (
     <div
       className="focus-view animate-fade-in"
       style={{
-        padding: '32px 24px 60px',
-        maxWidth: '800px',
+        padding: '24px 20px 48px',
+        maxWidth: '740px',
         margin: '0 auto',
         display: 'flex',
         flexDirection: 'column',
@@ -227,33 +280,33 @@ export default function Focus({
         width: '100%'
       }}
     >
-      {/* Top Breadcrumb / Navigation */}
+      {/* Top Breadcrumb & Live Clock */}
       <div
         style={{
           width: '100%',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          marginBottom: '24px'
+          marginBottom: '18px'
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span
             style={{
-              fontSize: '0.76rem',
+              fontSize: '0.74rem',
               fontWeight: 700,
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
-              color: isBusy ? 'var(--text-muted)' : isBreak ? 'var(--accent-emerald)' : 'var(--accent-primary)',
+              color: isBusy ? 'var(--text-muted)' : isBreak ? 'var(--accent-emerald)' : !isRunning ? 'var(--accent-amber, #f59e0b)' : 'var(--accent-primary)',
               fontFamily: 'var(--font-mono)'
             }}
           >
-            {isBusy ? 'BUSY / UNAVAILABLE' : isBreak ? 'RECHARGE IN PROGRESS' : 'FOCUS IN PROGRESS'}
+            {isBusy ? 'BUSY / UNAVAILABLE' : isBreak ? 'RECHARGE IN PROGRESS' : !isRunning ? 'PAUSED' : 'FOCUS IN PROGRESS'}
           </span>
           <span style={{ color: 'var(--border-medium)' }}>•</span>
           <span
             style={{
-              fontSize: '0.78rem',
+              fontSize: '0.74rem',
               color: 'var(--text-secondary)',
               fontFamily: 'var(--font-mono)'
             }}
@@ -262,22 +315,43 @@ export default function Focus({
           </span>
         </div>
 
-        <button
-          onClick={onNavigateToOverview}
-          style={{
-            fontSize: '0.84rem',
-            color: 'var(--text-secondary)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '6px 12px',
-            borderRadius: 'var(--radius-sm)',
-            backgroundColor: 'var(--bg-surface)'
-          }}
-        >
-          <span>View All Blocks</span>
-          <ChevronRight size={14} />
-        </button>
+        {/* Live Real-Time Clock */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-pill)',
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-hairline)',
+              fontSize: '0.75rem',
+              color: 'var(--text-secondary)',
+              fontFamily: 'var(--font-mono)'
+            }}
+          >
+            <Clock size={12} style={{ color: 'var(--accent-primary)' }} />
+            <span>Now: {currentTimeStr}</span>
+          </div>
+
+          <button
+            onClick={onNavigateToOverview}
+            style={{
+              fontSize: '0.8rem',
+              color: 'var(--text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '5px 10px',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'var(--bg-surface)'
+            }}
+          >
+            <span>Overview</span>
+            <ChevronRight size={13} />
+          </button>
+        </div>
       </div>
 
       {/* Main Focus Card */}
@@ -290,18 +364,20 @@ export default function Focus({
             ? '1.5px dashed rgba(126, 139, 160, 0.4)'
             : isBreak
             ? '1.5px solid var(--accent-emerald)'
+            : !isRunning
+            ? '1.5px solid var(--accent-amber, #f59e0b)'
             : '1.5px solid var(--accent-primary-faint)',
           borderRadius: 'var(--radius-xl)',
-          padding: '40px 24px',
+          padding: '28px 20px',
           textAlign: 'center',
           boxShadow: isBusy
             ? '0 0 20px rgba(0, 0, 0, 0.4)'
             : isBreak
-            ? '0 0 35px rgba(16, 185, 129, 0.12)'
-            : '0 0 35px rgba(56, 189, 248, 0.14)',
+            ? '0 0 30px rgba(16, 185, 129, 0.12)'
+            : '0 0 30px rgba(56, 189, 248, 0.12)',
           position: 'relative',
           overflow: 'hidden',
-          marginBottom: '24px'
+          marginBottom: '18px'
         }}
       >
         {/* Category / Goal Badge */}
@@ -310,14 +386,14 @@ export default function Focus({
             display: 'inline-flex',
             alignItems: 'center',
             gap: '8px',
-            padding: '6px 16px',
+            padding: '5px 14px',
             borderRadius: 'var(--radius-pill)',
             backgroundColor: 'var(--bg-card)',
             border: '1px solid var(--border-hairline)',
-            fontSize: '0.85rem',
-            fontWeight: 600,
+            fontSize: '0.84rem',
+            fontWeight: 700,
             color: 'var(--text-primary)',
-            marginBottom: '16px'
+            marginBottom: '12px'
           }}
         >
           <span>{currentBlock.icon || '🎯'}</span>
@@ -328,11 +404,11 @@ export default function Focus({
         {currentBlock.note && (
           <p
             style={{
-              fontSize: '0.88rem',
+              fontSize: '0.84rem',
               color: 'var(--text-secondary)',
-              maxWidth: '480px',
-              margin: '0 auto 28px',
-              lineHeight: 1.45
+              maxWidth: '460px',
+              margin: '0 auto 20px',
+              lineHeight: 1.4
             }}
           >
             {currentBlock.note}
@@ -343,10 +419,10 @@ export default function Focus({
         <div
           style={{
             position: 'relative',
-            width: '260px',
-            height: '260px',
+            width: '230px',
+            height: '230px',
             maxWidth: '100%',
-            margin: '0 auto 32px',
+            margin: '0 auto 24px',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
@@ -355,7 +431,7 @@ export default function Focus({
         >
           {/* SVG Progress Ring */}
           <svg
-            viewBox="0 0 260 260"
+            viewBox="0 0 230 230"
             style={{
               position: 'absolute',
               top: 0,
@@ -366,22 +442,22 @@ export default function Focus({
             }}
           >
             <circle
-              cx="130"
-              cy="130"
-              r="115"
+              cx="115"
+              cy="115"
+              r="102"
               stroke="var(--bg-card)"
-              strokeWidth="10"
+              strokeWidth="9"
               fill="none"
             />
             <circle
-              cx="130"
-              cy="130"
-              r="115"
-              stroke={isBusy ? 'var(--text-muted)' : isBreak ? 'var(--accent-emerald)' : 'var(--accent-primary)'}
-              strokeWidth="10"
+              cx="115"
+              cy="115"
+              r="102"
+              stroke={isBusy ? 'var(--text-muted)' : isBreak ? 'var(--accent-emerald)' : !isRunning ? 'var(--accent-amber, #f59e0b)' : 'var(--accent-primary)'}
+              strokeWidth="9"
               fill="none"
-              strokeDasharray={2 * Math.PI * 115}
-              strokeDashoffset={2 * Math.PI * 115 * (1 - progressPercent / 100)}
+              strokeDasharray={2 * Math.PI * 102}
+              strokeDashoffset={2 * Math.PI * 102 * (1 - progressPercent / 100)}
               strokeLinecap="round"
               style={{ transition: 'stroke-dashoffset 0.5s ease' }}
             />
@@ -390,7 +466,7 @@ export default function Focus({
           {/* Time digits */}
           <div
             style={{
-              fontSize: '3.6rem',
+              fontSize: '3.2rem',
               fontWeight: 800,
               color: 'var(--text-primary)',
               fontFamily: 'var(--font-mono)',
@@ -404,29 +480,42 @@ export default function Focus({
 
           <div
             style={{
-              fontSize: '0.78rem',
+              fontSize: '0.74rem',
               color: 'var(--text-muted)',
               fontFamily: 'var(--font-mono)',
-              marginTop: '6px',
+              marginTop: '4px',
               zIndex: 2
             }}
           >
             {currentBlock.startTime} — {currentBlock.endTime}
           </div>
+
+          {/* Worked vs Remaining Live Tracker */}
+          <div
+            style={{
+              fontSize: '0.68rem',
+              color: 'var(--text-secondary)',
+              fontFamily: 'var(--font-mono)',
+              marginTop: '2px',
+              zIndex: 2
+            }}
+          >
+            Worked: {actualWorkedMinutes}m · Remaining: {mins}m
+          </div>
         </div>
 
-        {/* Primary Controls: Play/Pause & Complete */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '14px', marginBottom: '24px' }}>
+        {/* Primary Controls: Play/Pause, Complete, and End Early */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '10px', marginBottom: '18px' }}>
           <button
             onClick={handleTogglePlayPause}
             style={{
-              padding: '14px 28px',
+              padding: '12px 24px',
               borderRadius: 'var(--radius-lg)',
               backgroundColor: isRunning ? 'var(--bg-card)' : 'var(--accent-primary)',
               color: isRunning ? 'var(--text-primary)' : '#06070a',
               border: '1px solid var(--border-subtle)',
               fontWeight: 700,
-              fontSize: '0.95rem',
+              fontSize: '0.9rem',
               display: 'inline-flex',
               alignItems: 'center',
               gap: '8px'
@@ -434,13 +523,13 @@ export default function Focus({
           >
             {isRunning ? (
               <>
-                <Pause size={18} />
-                <span>Pause Timer</span>
+                <Pause size={17} />
+                <span>Pause</span>
               </>
             ) : (
               <>
-                <Play size={18} fill="#06070a" />
-                <span>Resume Timer</span>
+                <Play size={17} fill="#06070a" />
+                <span>Resume Schedule</span>
               </>
             )}
           </button>
@@ -449,40 +538,73 @@ export default function Focus({
             <button
               onClick={onEndBreakEarly}
               style={{
-                padding: '14px 28px',
+                padding: '12px 24px',
                 borderRadius: 'var(--radius-lg)',
                 backgroundColor: 'var(--accent-emerald)',
                 color: '#06070a',
                 fontWeight: 700,
-                fontSize: '0.95rem',
+                fontSize: '0.9rem',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '8px',
                 boxShadow: '0 4px 16px rgba(16, 185, 129, 0.25)'
               }}
             >
-              <Sparkles size={18} />
+              <Sparkles size={17} />
               <span>I'm Ready Early →</span>
             </button>
           ) : (
-            <button
-              onClick={handleBlockCompletion}
-              style={{
-                padding: '14px 28px',
-                borderRadius: 'var(--radius-lg)',
-                backgroundColor: 'var(--accent-primary)',
-                color: '#06070a',
-                fontWeight: 700,
-                fontSize: '0.95rem',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 4px 20px rgba(56, 189, 248, 0.25)'
-              }}
-            >
-              <CheckCircle2 size={18} />
-              <span>{isBusy ? 'Finish Busy Block →' : 'Complete Block →'}</span>
-            </button>
+            <>
+              <button
+                onClick={handleBlockCompletion}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: 'var(--radius-lg)',
+                  backgroundColor: 'var(--accent-primary)',
+                  color: '#06070a',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 18px rgba(56, 189, 248, 0.25)'
+                }}
+              >
+                <CheckCircle2 size={17} />
+                <span>{isBusy ? 'Finish Busy Block →' : 'Complete Block →'}</span>
+              </button>
+
+              {/* Explicit End Early Button */}
+              {actualWorkedMinutes > 0 && (
+                <button
+                  onClick={handleEndEarly}
+                  style={{
+                    padding: '12px 18px',
+                    borderRadius: 'var(--radius-lg)',
+                    backgroundColor: 'var(--bg-card)',
+                    color: 'var(--text-secondary)',
+                    border: '1px solid var(--border-hairline)',
+                    fontWeight: 600,
+                    fontSize: '0.84rem',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = 'var(--accent-primary)';
+                    e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = 'var(--text-secondary)';
+                    e.currentTarget.style.borderColor = 'var(--border-hairline)';
+                  }}
+                  title="Finish now and log actual worked time"
+                >
+                  <Square size={14} />
+                  <span>End Early ({actualWorkedMinutes}m)</span>
+                </button>
+              )}
+            </>
           )}
         </div>
 
@@ -493,8 +615,8 @@ export default function Focus({
               display: 'flex',
               flexWrap: 'wrap',
               justifyContent: 'center',
-              gap: '8px',
-              paddingTop: '20px',
+              gap: '6px',
+              paddingTop: '16px',
               borderTop: '1px solid var(--border-hairline)'
             }}
           >
@@ -502,12 +624,12 @@ export default function Focus({
             <button
               onClick={() => onAddTime(15)}
               style={{
-                padding: '8px 14px',
+                padding: '7px 12px',
                 borderRadius: 'var(--radius-md)',
                 backgroundColor: 'var(--bg-card)',
                 color: 'var(--text-secondary)',
                 border: '1px solid var(--border-hairline)',
-                fontSize: '0.82rem',
+                fontSize: '0.78rem',
                 fontWeight: 600,
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -516,7 +638,7 @@ export default function Focus({
               onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
               onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
             >
-              <Plus size={14} />
+              <Plus size={13} />
               <span>+15 min</span>
             </button>
 
@@ -524,12 +646,12 @@ export default function Focus({
             <button
               onClick={() => onAddTime(30)}
               style={{
-                padding: '8px 14px',
+                padding: '7px 12px',
                 borderRadius: 'var(--radius-md)',
                 backgroundColor: 'var(--bg-card)',
                 color: 'var(--text-secondary)',
                 border: '1px solid var(--border-hairline)',
-                fontSize: '0.82rem',
+                fontSize: '0.78rem',
                 fontWeight: 600,
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -538,7 +660,7 @@ export default function Focus({
               onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
               onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
             >
-              <Plus size={14} />
+              <Plus size={13} />
               <span>+30 min</span>
             </button>
 
@@ -546,19 +668,19 @@ export default function Focus({
             <button
               onClick={() => onOpenBreakModal(currentBlock)}
               style={{
-                padding: '8px 14px',
+                padding: '7px 12px',
                 borderRadius: 'var(--radius-md)',
                 backgroundColor: 'var(--bg-card)',
                 color: 'var(--accent-emerald)',
                 border: '1px solid var(--border-hairline)',
-                fontSize: '0.82rem',
+                fontSize: '0.78rem',
                 fontWeight: 600,
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '6px'
+                gap: '5px'
               }}
             >
-              <Coffee size={14} />
+              <Coffee size={13} />
               <span>Need a Break</span>
             </button>
 
@@ -566,21 +688,21 @@ export default function Focus({
             <button
               onClick={() => onOpenPushLaterModal(currentBlock)}
               style={{
-                padding: '8px 14px',
+                padding: '7px 12px',
                 borderRadius: 'var(--radius-md)',
                 backgroundColor: 'var(--bg-card)',
                 color: 'var(--text-secondary)',
                 border: '1px solid var(--border-hairline)',
-                fontSize: '0.82rem',
+                fontSize: '0.78rem',
                 fontWeight: 600,
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '6px'
+                gap: '5px'
               }}
               onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent-primary)')}
               onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
             >
-              <ArrowDown size={14} />
+              <ArrowDown size={13} />
               <span>Push Later</span>
             </button>
 
@@ -588,19 +710,19 @@ export default function Focus({
             <button
               onClick={handleBlockCancellation}
               style={{
-                padding: '8px 14px',
+                padding: '7px 12px',
                 borderRadius: 'var(--radius-md)',
                 backgroundColor: 'var(--bg-card)',
                 color: 'var(--accent-coral)',
                 border: '1px solid var(--border-hairline)',
-                fontSize: '0.82rem',
+                fontSize: '0.78rem',
                 fontWeight: 600,
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '4px'
               }}
             >
-              <Trash2 size={13} />
+              <Trash2 size={12} />
               <span>Cancel Block</span>
             </button>
           </div>
@@ -615,22 +737,22 @@ export default function Focus({
             backgroundColor: 'var(--bg-surface)',
             border: '1px solid var(--border-hairline)',
             borderRadius: 'var(--radius-lg)',
-            padding: '16px 20px',
+            padding: '12px 16px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: '12px'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-            <span style={{ fontSize: '1.2rem', flexShrink: 0 }}>{nextBlock.icon || '📌'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+            <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>{nextBlock.icon || '📌'}</span>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>
                 Up Next ({nextBlock.startTime})
               </div>
               <div
                 style={{
-                  fontSize: '0.92rem',
+                  fontSize: '0.86rem',
                   fontWeight: 600,
                   color: 'var(--text-primary)',
                   whiteSpace: 'nowrap',
@@ -645,7 +767,7 @@ export default function Focus({
 
           <span
             style={{
-              fontSize: '0.78rem',
+              fontSize: '0.76rem',
               color: 'var(--accent-primary)',
               fontFamily: 'var(--font-mono)',
               fontWeight: 600,

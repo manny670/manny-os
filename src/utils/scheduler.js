@@ -1,7 +1,7 @@
 /**
- * Orbit Block-by-Block Scheduling & Rescheduling Engine
- * Calculates clean timestamps, cascades downstream schedule changes,
- * computes Planned vs Completed goal time tracking, and tracks Started vs Finished stats.
+ * Orbit Real-Time Scheduling, Dynamic Rescheduling & Goal Tracking Engine
+ * Supports live pause schedule shifting, actual worked time tracking, early endings,
+ * cascading downstream recalculations, and goal recommendation scoring.
  */
 
 import {
@@ -9,11 +9,11 @@ import {
   minutesToTimeString,
   formatDuration,
   roundToCleanIncrement,
-  snapDurationToClean
+  getCurrentTimeMinutes
 } from './timeHelpers.js';
 
 /**
- * Evaluates goals and produces ranked priorities
+ * Evaluates goals and produces ranked priorities with recommendation flags
  */
 export function scoreAndRankGoals(goals = [], selectedGoalId = 'none') {
   const scored = goals.map((goal) => {
@@ -21,6 +21,7 @@ export function scoreAndRankGoals(goals = [], selectedGoalId = 'none') {
     const target = goal.weeklyTarget || 1;
     const completed = goal.completed || 0;
     const progressRatio = Math.min(completed / target, 1.5);
+    const deficit = Math.max(0, target - completed);
     const deficitScore = Math.max(0, (1 - progressRatio) * 25);
 
     let selectionBoost = 0;
@@ -35,12 +36,16 @@ export function scoreAndRankGoals(goals = [], selectedGoalId = 'none') {
 
     const totalScore = baseScore + deficitScore + selectionBoost;
 
+    // A goal is recommended if it has a weekly deficit or is high priority (priority >= 4)
+    const isRecommended = (goal.priority >= 4 && deficit > 0) || deficit >= 1 || (goal.priority === 5);
+
     return {
       ...goal,
       internalScore: totalScore,
       selectionReason,
       isDailyFocus: selectionBoost > 0,
-      deficit: target - completed
+      isRecommended,
+      deficit
     };
   });
 
@@ -48,14 +53,14 @@ export function scoreAndRankGoals(goals = [], selectedGoalId = 'none') {
 
   return scored.map((item, index) => ({
     ...item,
-    rank: String(index + 1).padStart(2, '0')
+    rank: String(index + 1).padStart(2, '0'),
+    // Ensure at least the top 2 ranked items are marked as recommended
+    isRecommended: item.isRecommended || index < 2
   }));
 }
 
 /**
  * Builds a complete Orbit schedule from the user's customized block-by-block inputs.
- * Chains all blocks chronologically, computes clean 5-minute increments,
- * per-goal planned vs completed time, and started vs finished metrics.
  */
 export function buildScheduleFromUserBlocks({
   blocks = [],
@@ -73,8 +78,6 @@ export function buildScheduleFromUserBlocks({
   if (endMin <= startMin) endMin += 1440;
   let effectiveBedtime = bedtimeMin;
   if (effectiveBedtime <= startMin) effectiveBedtime += 1440;
-
-  const hardCeiling = Math.min(endMin, effectiveBedtime);
 
   // Recalculate timestamps for the user blocks starting from startMin
   const calculatedBlocks = recalculateScheduleTimes(blocks, startMin);
@@ -100,7 +103,7 @@ export function buildScheduleFromUserBlocks({
 
     const completedForGoal = calculatedBlocks
       .filter((b) => b.goalId === goal.id && b.completed)
-      .reduce((acc, b) => acc + (b.durationMinutes || 0), 0);
+      .reduce((acc, b) => acc + (b.actualWorkedMinutes || b.durationMinutes || 0), 0);
 
     const remainingPlanned = Math.max(0, plannedForGoal - completedForGoal);
 
@@ -121,7 +124,6 @@ export function buildScheduleFromUserBlocks({
     };
   });
 
-  // Calculate Started vs Finished counts
   const startedCount = calculatedBlocks.filter((b) => b.started || b.completed).length;
   const finishedCount = calculatedBlocks.filter((b) => b.completed).length;
 
@@ -140,14 +142,12 @@ export function buildScheduleFromUserBlocks({
     startedCount,
     finishedCount,
     perGoalStats,
-    contextSummary: `Custom block-by-block schedule · ${calculatedBlocks.length} blocks planned.`
+    contextSummary: `Schedule with ${calculatedBlocks.length} blocks.`
   };
 }
 
 /**
  * Robustly recalculates timestamps for all blocks starting from a clean start time.
- * If any block duration changes, this cascades and updates all subsequent block start/end times automatically.
- * Ensures clean 5-minute multiples with ZERO NaN or N/A values.
  */
 export function recalculateScheduleTimes(blocks = [], startMinutes = 780) {
   if (!Array.isArray(blocks) || blocks.length === 0) return [];
@@ -158,6 +158,17 @@ export function recalculateScheduleTimes(blocks = [], startMinutes = 780) {
     const dur = typeof block.durationMinutes === 'number' && !isNaN(block.durationMinutes) && block.durationMinutes > 0
       ? roundToCleanIncrement(block.durationMinutes, 5)
       : 30;
+
+    // If block is already completed and has fixed timestamps, preserve them
+    if (block.completed && block.startMinutes != null && block.endMinutes != null) {
+      clock = Math.max(clock, block.endMinutes);
+      return {
+        ...block,
+        durationMinutes: block.actualWorkedMinutes || block.durationMinutes || dur,
+        startTime: minutesToTimeString(block.startMinutes),
+        endTime: minutesToTimeString(block.endMinutes)
+      };
+    }
 
     // Busy blocks are fixed anchors at their predetermined clock time
     if (block.isBusy || block.type === 'busy') {
@@ -198,9 +209,115 @@ export function recalculateScheduleTimes(blocks = [], startMinutes = 780) {
 }
 
 /**
+ * Dynamically shifts schedule when a paused block resumes at currentClockMinutes.
+ * The active block finishes at (currentClockMinutes + remainingMinutes).
+ * All following blocks shift accordingly!
+ */
+export function shiftScheduleOnResume({
+  blocks = [],
+  activeIndex = 0,
+  currentClockMinutes = null,
+  remainingMinutes = 30
+}) {
+  if (!blocks || blocks.length === 0 || activeIndex >= blocks.length) return blocks;
+
+  const nowMin = currentClockMinutes !== null
+    ? roundToCleanIncrement(currentClockMinutes, 5)
+    : getCurrentTimeMinutes();
+
+  const cleanRemaining = roundToCleanIncrement(Math.max(5, remainingMinutes), 5);
+
+  const updated = blocks.map((b, idx) => ({ ...b }));
+  const activeBlock = updated[activeIndex];
+
+  // Active block's new end time is nowMin + cleanRemaining
+  const newActiveEnd = nowMin + cleanRemaining;
+  activeBlock.endMinutes = newActiveEnd;
+  activeBlock.endTime = minutesToTimeString(newActiveEnd);
+  activeBlock.remainingMinutes = cleanRemaining;
+  activeBlock.status = 'active';
+
+  // Cascade shift to all subsequent blocks starting from newActiveEnd
+  let runningClock = newActiveEnd;
+  for (let i = activeIndex + 1; i < updated.length; i++) {
+    const block = updated[i];
+    if (block.isBusy || block.type === 'busy') {
+      runningClock = Math.max(runningClock, block.endMinutes || runningClock);
+      continue;
+    }
+    const dur = block.durationMinutes || 30;
+    const bStart = runningClock;
+    const bEnd = bStart + dur;
+    runningClock = bEnd;
+
+    updated[i] = {
+      ...block,
+      startMinutes: bStart,
+      endMinutes: bEnd,
+      startTime: minutesToTimeString(bStart),
+      endTime: minutesToTimeString(bEnd)
+    };
+  }
+
+  return updated;
+}
+
+/**
+ * Ends a block early with actualWorkedMinutes and shifts all following blocks to start NOW.
+ */
+export function finishBlockEarly({
+  blocks = [],
+  activeIndex = 0,
+  actualWorkedMinutes = 30,
+  currentClockMinutes = null
+}) {
+  if (!blocks || blocks.length === 0 || activeIndex >= blocks.length) return blocks;
+
+  const nowMin = currentClockMinutes !== null
+    ? roundToCleanIncrement(currentClockMinutes, 5)
+    : getCurrentTimeMinutes();
+
+  const cleanActual = Math.max(1, Math.round(actualWorkedMinutes));
+
+  const updated = blocks.map((b, idx) => ({ ...b }));
+  const activeBlock = updated[activeIndex];
+
+  // Record actual finished state
+  activeBlock.completed = true;
+  activeBlock.status = 'ended_early';
+  activeBlock.actualWorkedMinutes = cleanActual;
+  activeBlock.durationMinutes = cleanActual;
+  activeBlock.remainingMinutes = 0;
+  activeBlock.endMinutes = nowMin;
+  activeBlock.endTime = minutesToTimeString(nowMin);
+
+  // Subsequent blocks start immediately at nowMin
+  let runningClock = nowMin;
+  for (let i = activeIndex + 1; i < updated.length; i++) {
+    const block = updated[i];
+    if (block.isBusy || block.type === 'busy') {
+      runningClock = Math.max(runningClock, block.endMinutes || runningClock);
+      continue;
+    }
+    const dur = block.durationMinutes || 30;
+    const bStart = runningClock;
+    const bEnd = bStart + dur;
+    runningClock = bEnd;
+
+    updated[i] = {
+      ...block,
+      startMinutes: bStart,
+      endMinutes: bEnd,
+      startTime: minutesToTimeString(bStart),
+      endTime: minutesToTimeString(bEnd)
+    };
+  }
+
+  return updated;
+}
+
+/**
  * Intelligent schedule adjustment engine for extending tasks (+15m / +30m)
- * Absorbs extra time from downstream Free Time or buffers when possible,
- * or extends day end time without breaking busy blocks or creating invalid times.
  */
 export function adjustScheduleForExtendedBlock(blocks = [], activeIndex = 0, addedMinutes = 15, hardEndTimeStr = '9:30 PM', bedtimeStr = '10:30 PM') {
   if (!blocks || blocks.length === 0 || activeIndex >= blocks.length) {
@@ -217,7 +334,7 @@ export function adjustScheduleForExtendedBlock(blocks = [], activeIndex = 0, add
   targetBlock.durationMinutes = (targetBlock.durationMinutes || 30) + addedMinutes;
   targetBlock.remainingMinutes = (targetBlock.remainingMinutes || targetBlock.durationMinutes) + addedMinutes;
 
-  // Check if we can borrow from downstream Free Time (to preserve user's end time)
+  // Check if we can borrow from downstream Free Time
   let timeToAbsorb = addedMinutes;
   for (let i = updatedBlocks.length - 1; i > activeIndex; i--) {
     if (timeToAbsorb <= 0) break;
@@ -229,7 +346,6 @@ export function adjustScheduleForExtendedBlock(blocks = [], activeIndex = 0, add
     }
   }
 
-  // Recalculate timestamps starting from the first block's start time
   const recalculated = recalculateScheduleTimes(updatedBlocks, updatedBlocks[0]?.startMinutes || 780);
   const finalEndMin = recalculated[recalculated.length - 1]?.endMinutes || 0;
 
@@ -246,111 +362,4 @@ export function adjustScheduleForExtendedBlock(blocks = [], activeIndex = 0, add
     blocks: recalculated,
     message: `Added +${addedMinutes}m to "${targetBlock.title}".`
   };
-}
-
-/**
- * Preserved fallback generator for quick full day creation if needed
- */
-export function generateOrbitSchedule({
-  startTime = '4:00 PM',
-  endTime = '9:30 PM',
-  bedtime = '10:30 PM',
-  energy = 'normal',
-  schoolworkMinutes = 60,
-  selectedGoalId = 'none',
-  isBusy = false,
-  busyRanges = [],
-  gymToday = false,
-  gymStartTime = 'flexible',
-  gymDuration = 60,
-  gymBufferMinutes = 15,
-  freeTimeMinutes = 60,
-  goals = []
-}) {
-  const startMin = roundToCleanIncrement(parseTimeToMinutes(startTime), 5);
-  let endMin = roundToCleanIncrement(parseTimeToMinutes(endTime), 5);
-  const bedtimeMin = roundToCleanIncrement(parseTimeToMinutes(bedtime), 5);
-
-  if (endMin <= startMin) endMin += 1440;
-  let effectiveBedtime = bedtimeMin;
-  if (effectiveBedtime <= startMin) effectiveBedtime += 1440;
-
-  const hardCeiling = Math.min(endMin, effectiveBedtime);
-  const rankedGoals = scoreAndRankGoals(goals, selectedGoalId);
-
-  const sampleBlocks = [];
-
-  if (schoolworkMinutes > 0) {
-    sampleBlocks.push({
-      id: `block-${Date.now()}-1`,
-      type: 'schoolwork',
-      goalId: null,
-      title: 'AP Schoolwork',
-      icon: '📚',
-      durationMinutes: schoolworkMinutes,
-      tracked: true,
-      note: 'Academic assignments and study'
-    });
-  }
-
-  if (selectedGoalId && selectedGoalId !== 'none') {
-    const g = goals.find((item) => item.id === selectedGoalId);
-    if (g) {
-      sampleBlocks.push({
-        id: `block-${Date.now()}-2`,
-        type: 'goal',
-        goalId: g.id,
-        title: g.name,
-        icon: g.icon || '🎯',
-        durationMinutes: g.sessionMinutes || 45,
-        tracked: true,
-        note: 'Selected priority goal'
-      });
-    }
-  }
-
-  if (gymToday) {
-    sampleBlocks.push({
-      id: `block-${Date.now()}-3`,
-      type: 'gym',
-      goalId: 'gym',
-      title: 'Gym',
-      icon: '🏋️',
-      durationMinutes: gymDuration || 60,
-      tracked: true,
-      note: 'Workout session'
-    });
-    if (gymBufferMinutes > 0) {
-      sampleBlocks.push({
-        id: `block-${Date.now()}-4`,
-        type: 'break',
-        goalId: null,
-        title: 'Shower & Cooldown',
-        icon: '🚿',
-        durationMinutes: gymBufferMinutes,
-        tracked: false,
-        note: 'Post-workout cooldown'
-      });
-    }
-  }
-
-  sampleBlocks.push({
-    id: `block-${Date.now()}-5`,
-    type: 'freetime',
-    goalId: null,
-    title: 'Free Time',
-    icon: '🎮',
-    durationMinutes: freeTimeMinutes || 60,
-    tracked: false,
-    note: 'Protected evening downtime'
-  });
-
-  return buildScheduleFromUserBlocks({
-    blocks: sampleBlocks,
-    startTime,
-    endTime,
-    bedtime,
-    energy,
-    goals
-  });
 }

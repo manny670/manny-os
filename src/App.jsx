@@ -16,7 +16,9 @@ import {
   scoreAndRankGoals,
   buildScheduleFromUserBlocks,
   recalculateScheduleTimes,
-  adjustScheduleForExtendedBlock
+  adjustScheduleForExtendedBlock,
+  shiftScheduleOnResume,
+  finishBlockEarly
 } from './utils/scheduler.js';
 import {
   parseTimeToMinutes,
@@ -94,7 +96,7 @@ export default function App() {
   const handleCheckInSubmit = (preferences) => {
     const built = buildScheduleFromUserBlocks({
       blocks: preferences.blocks || [],
-      startTime: preferences.startTime || '4:00 PM',
+      startTime: preferences.startTime || getCurrentTimeString(),
       endTime: preferences.endTime || '9:30 PM',
       bedtime: preferences.bedtime || '10:30 PM',
       energy: preferences.energy || 'normal',
@@ -142,7 +144,6 @@ export default function App() {
   const handleUpdateBlockDuration = (blockIndex, newDuration) => {
     if (!planState || !planState.blocks) return;
 
-    const startMin = parseTimeToMinutes(planState.scheduledStartTime || '4:00 PM');
     const updatedBlocks = planState.blocks.map((b, idx) => {
       if (idx === blockIndex) {
         return {
@@ -209,6 +210,136 @@ export default function App() {
     showToast('Block removed. Timeline updated.', 'info');
   };
 
+  // --- LIVE PAUSE / RESUME SCHEDULE SHIFTING ---
+  const handleShiftScheduleOnResume = (fromIndex, remainingMinutes) => {
+    if (!planState || !planState.blocks) return;
+
+    const shiftedBlocks = shiftScheduleOnResume({
+      blocks: planState.blocks,
+      activeIndex: fromIndex,
+      currentClockMinutes: getCurrentTimeMinutes(),
+      remainingMinutes
+    });
+
+    const built = buildScheduleFromUserBlocks({
+      blocks: shiftedBlocks,
+      startTime: planState.scheduledStartTime || '4:00 PM',
+      endTime: planState.hardEndTime || '9:30 PM',
+      bedtime: planState.bedtime || '10:30 PM',
+      energy: planState.energy || 'normal',
+      goals,
+      activity
+    });
+
+    const updatedPlan = {
+      ...planState,
+      ...built,
+      blocks: shiftedBlocks
+    };
+
+    setPlanState(updatedPlan);
+    saveStoredPlan(updatedPlan);
+  };
+
+  // --- END BLOCK EARLY (Logs actual worked time & shifts following blocks to start now) ---
+  const handleEndBlockEarly = (currentBlock, actualWorkedMinutes) => {
+    if (!planState || !planState.blocks) return;
+
+    const currentIdx = planState.activeIndex || 0;
+    const isTracked = currentBlock.tracked;
+    const loggedMinutes = Math.max(1, actualWorkedMinutes || 1);
+
+    // 1. Log actual worked time to activity
+    if (isTracked) {
+      const newActivityItem = {
+        id: `act-${Date.now()}`,
+        goalId: currentBlock.goalId,
+        title: currentBlock.title,
+        icon: currentBlock.icon || '🎯',
+        minutes: loggedMinutes,
+        date: new Date().toISOString(),
+        timestamp: Date.now(),
+        note: currentBlock.note || 'Focused session (Ended early)'
+      };
+
+      setActivity((prev) => {
+        const nextActivity = [newActivityItem, ...prev];
+        saveStoredActivity(nextActivity);
+        return nextActivity;
+      });
+
+      // Update goal completed amount based on ACTUAL worked hours
+      if (currentBlock.goalId) {
+        setGoals((prevGoals) => {
+          const nextGoals = prevGoals.map((g) => {
+            if (g.id === currentBlock.goalId) {
+              const increment = g.unit === 'sessions' ? 1 : loggedMinutes / 60;
+              return {
+                ...g,
+                completed: parseFloat(((g.completed || 0) + increment).toFixed(2))
+              };
+            }
+            return g;
+          });
+          saveStoredGoals(nextGoals);
+          return nextGoals;
+        });
+      }
+    }
+
+    // 2. Shift subsequent blocks to start NOW
+    const earlyFinishedBlocks = finishBlockEarly({
+      blocks: planState.blocks,
+      activeIndex: currentIdx,
+      actualWorkedMinutes: loggedMinutes,
+      currentClockMinutes: getCurrentTimeMinutes()
+    });
+
+    const nextIndex = currentIdx + 1;
+
+    const built = buildScheduleFromUserBlocks({
+      blocks: earlyFinishedBlocks,
+      startTime: planState.scheduledStartTime || '4:00 PM',
+      endTime: planState.hardEndTime || '9:30 PM',
+      bedtime: planState.bedtime || '10:30 PM',
+      energy: planState.energy || 'normal',
+      goals,
+      activity
+    });
+
+    if (nextIndex >= earlyFinishedBlocks.length) {
+      const finishedPlan = {
+        ...planState,
+        ...built,
+        blocks: earlyFinishedBlocks,
+        activeIndex: nextIndex,
+        dayState: 'completed'
+      };
+      setPlanState(finishedPlan);
+      saveStoredPlan(finishedPlan);
+      setCurrentPage('today');
+
+      try {
+        confetti({
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.6 }
+        });
+      } catch (e) {}
+      showToast(`Logged ${loggedMinutes}m. That’s enough for today!`, 'success');
+    } else {
+      const advancedPlan = {
+        ...planState,
+        ...built,
+        blocks: earlyFinishedBlocks,
+        activeIndex: nextIndex
+      };
+      setPlanState(advancedPlan);
+      saveStoredPlan(advancedPlan);
+      showToast(`Logged ${loggedMinutes}m. Next block starting now.`, 'success');
+    }
+  };
+
   // --- DAY CONTROLS ---
   const handleStartDay = () => {
     if (!planState?.blocks || planState.blocks.length === 0) return;
@@ -244,22 +375,24 @@ export default function App() {
 
   // --- FOCUS ACTIONS ---
 
-  // 1. Complete Active Block
-  const handleCompleteBlock = (completedBlock) => {
+  // Complete Active Block with ACTUAL elapsed worked minutes
+  const handleCompleteBlock = (completedBlock, actualWorkedMinutes) => {
     if (!planState || !planState.blocks) return;
 
     const currentIdx = planState.activeIndex || 0;
     const isTracked = completedBlock.tracked;
-    const duration = completedBlock.durationMinutes || 30;
+    const loggedMinutes = actualWorkedMinutes !== undefined
+      ? Math.max(1, actualWorkedMinutes)
+      : (completedBlock.durationMinutes || 30);
 
-    // If tracked, log to activity & update goal progress immediately with persistent save
+    // If tracked, log ACTUAL worked minutes to activity & update goal progress
     if (isTracked) {
       const newActivityItem = {
         id: `act-${Date.now()}`,
         goalId: completedBlock.goalId,
         title: completedBlock.title,
         icon: completedBlock.icon || '🎯',
-        minutes: duration,
+        minutes: loggedMinutes,
         date: new Date().toISOString(),
         timestamp: Date.now(),
         note: completedBlock.note || 'Focused session'
@@ -271,12 +404,12 @@ export default function App() {
         return nextActivity;
       });
 
-      // Update goal completed amount
+      // Update goal completed amount with actual tracked hours
       if (completedBlock.goalId) {
         setGoals((prevGoals) => {
           const nextGoals = prevGoals.map((g) => {
             if (g.id === completedBlock.goalId) {
-              const increment = g.unit === 'sessions' ? 1 : duration / 60;
+              const increment = g.unit === 'sessions' ? 1 : loggedMinutes / 60;
               return {
                 ...g,
                 completed: parseFloat(((g.completed || 0) + increment).toFixed(2))
@@ -295,6 +428,7 @@ export default function App() {
     updatedBlocks[currentIdx] = {
       ...updatedBlocks[currentIdx],
       completed: true,
+      actualWorkedMinutes: loggedMinutes,
       remainingMinutes: 0
     };
 
@@ -311,7 +445,6 @@ export default function App() {
       activity
     });
 
-    // Check if entire day is complete
     if (nextIndex >= updatedBlocks.length) {
       const finishedPlan = {
         ...planState,
@@ -341,11 +474,11 @@ export default function App() {
       };
       setPlanState(advancedPlan);
       saveStoredPlan(advancedPlan);
-      showToast(`"${completedBlock.title}" completed. Next block starting.`, 'success');
+      showToast(`"${completedBlock.title}" completed (${loggedMinutes}m). Next block starting.`, 'success');
     }
   };
 
-  // 2. Cancel Active Block
+  // Cancel Active Block
   const handleCancelBlock = (canceledBlock) => {
     if (!planState || !planState.blocks) return;
 
@@ -377,7 +510,7 @@ export default function App() {
     }
   };
 
-  // 3. Add Time (+15 / +30 mins) with downstream cascade
+  // Add Time (+15 / +30 mins)
   const handleAddTime = (addedMinutes) => {
     if (!planState || !planState.blocks) return;
 
@@ -409,7 +542,7 @@ export default function App() {
     showToast(result.message, 'success');
   };
 
-  // 4. Need a Break Flow
+  // Need a Break Flow
   const handleOpenBreakModal = (block) => {
     setBreakTargetBlock(block);
   };
@@ -499,11 +632,11 @@ export default function App() {
       saveStoredPlan(updated);
       showToast('Break ended early. Resuming your task now.', 'success');
     } else {
-      handleCompleteBlock(currentBlock);
+      handleCompleteBlock(currentBlock, currentBlock.durationMinutes);
     }
   };
 
-  // 5. Push Later Flow
+  // Push Later Flow
   const handleOpenPushLaterModal = (block) => {
     setPushLaterBlock(block);
   };
@@ -691,6 +824,8 @@ export default function App() {
             onOpenPushLaterModal={handleOpenPushLaterModal}
             onNavigateToOverview={() => setCurrentPage('overview')}
             onEndBreakEarly={handleEndBreakEarly}
+            onShiftScheduleOnResume={handleShiftScheduleOnResume}
+            onEndBlockEarly={handleEndBlockEarly}
           />
         )}
 
